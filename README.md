@@ -51,7 +51,7 @@ python setup.py install
 ```
 
 
-If you failed when installing any python modules you can always use this way, get that module from github then build them manually
+If you fail when installing any python modules using pip, you can always use this way, get that module from github then build them manually
 
 
 ### Usage
