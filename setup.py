@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+    #!/usr/bin/env python3
 from __future__ import unicode_literals
 
 import sys
@@ -21,14 +21,14 @@ if sys.version_info < (2, 6):
 
 
 long_description = (
-    'pyvosklivesubtitle is a python based desktop aplication similar to Google Translate web aplication,'
-    'with an extra feature LIVE SUBTITLE which can display subtitle translation for live streams'
-    'in 21 languages that supported by VOSK'
+    'pyvosklivesubtitle is a python based desktop aplication which can recognize any live streaming'
+    'in 21 languages that supported by VOSK then translate and display it as LIVE SUBTITLES'
     )
 
 setup(
     name="pyvosklivesubtitle",
-    version="0.0.1",
+    description="A Python based desktop aplication which can RECOGNIZE any live streaming in 21 languages that supported by VOSK then TRANSLATE and display it as LIVE SUBTITLES",
+    version="0.0.2",
     include_package_data=True,
     author='Bot Bahlul',
     author_email='bot.bahlul@gmail.com',
