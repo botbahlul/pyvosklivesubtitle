@@ -2,9 +2,11 @@
 
 ### A Python based desktop aplication that can RECOGNIZE any live streaming in 21 languages that supported by VOSK then TRANSLATE and display it as LIVE SUBTITLES
 
+the speech recognition part is using vosk
+
 the translation part is using googletrans==4.0.0-rc1
 
-the GUI part developed with pysimplegui https://github.com/PySimpleGUI/PySimpleGUI
+the GUI part is using pysimplegui https://github.com/PySimpleGUI/PySimpleGUI
 
 ### Installation
 
@@ -16,16 +18,20 @@ if python has already installed on your system you can install this script with 
 pip install pyvosklivesubtitle
 ```
 
-you can compile this script into a single executable file with pyinstaller by renaming
-```__init__.py``` file to ```pyvosklivesubtitle.py``` and type :
+then you can run it by just type 
+```
+pyvosklivesubtitle
+```
+
+if you're windows user you can compile script in win folder into a single executable file with pyinstaller :
 
 ```
 pip install pyinstaller
-pyinstaller --onefile pyvosklivesubtitle.py
+pyinstaller --onefile pyvls.py
 ```
 
 The executable compiled file will be placed by pyinstaller into dist subfolder of your current working folder, then you can just
-rename and put that compiled file into a folder that has been added to your PATH ENVIRONTMENT so you can execute it from anywhere.
+rename and put that compiled exe file into a folder that has been added to your PATH ENVIRONTMENT so you can execute it from anywhere.
 
 DONT FORGET TO PLACE THOSE 4 LIBS FILES FROM VOSK (libgcc_s_seh-1.dll, libstdc++-6.dll, libvosk.dll, & libwinpthread-1.dll) into
 same folder with compiled exe file
