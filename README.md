@@ -1,6 +1,6 @@
 # pyvosklivesubtitle <a href="https://pypi.org/project/pyvosklivesubtitle/0.0.1/"><img src="https://img.shields.io/pypi/v/pyvosklivesubtitle.svg"></img></a>
 
-### A Python based desktop aplication which can recognize any live streaming in 21 languages that supported by VOSK then translate and display it as LIVE SUBTITLES
+### A Python based desktop aplication which can RECOGNIZE any live streaming in 21 languages that supported by VOSK then TRANSLATE and display it as LIVE SUBTITLES
 
 the translation part is using googletrans==4.0.0-rc1
 
@@ -26,6 +26,9 @@ pyinstaller --onefile pyvosklivesubtitle.pyw
 
 The executable compiled file will be placed by pyinstaller into dist subfolder of your current working folder, then you can just
 rename and put that compiled file into a folder that has been added to your PATH ENVIRONTMENT so you can execute it from anywhere.
+
+DONT FORGET TO PLACE THOSE 4 LIBS FILES FROM VOSK (libgcc_s_seh-1.dll, libstdc++-6.dll, libvosk.dll, & libwinpthread-1.dll) into
+same folder with compiled exe file
 
 I was succesfuly compiled it in Windows 10 with pyinstaller-5.1 and Pyhton-3.10.4, and python-3.8.12 in Debian 9
 
