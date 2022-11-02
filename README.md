@@ -17,11 +17,11 @@ pip install pyvosklivesubtitle
 ```
 
 you can compile this script into a single executable file with pyinstaller by renaming
-```__init__.py``` file to ```pyvosklivesubtitle.pyw``` and type :
+```__init__.py``` file to ```pyvosklivesubtitle.py``` and type :
 
 ```
 pip install pyinstaller
-pyinstaller --onefile pyvosklivesubtitle.pyw
+pyinstaller --onefile pyvosklivesubtitle.py
 ```
 
 The executable compiled file will be placed by pyinstaller into dist subfolder of your current working folder, then you can just
