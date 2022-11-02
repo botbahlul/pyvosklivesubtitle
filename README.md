@@ -1,4 +1,4 @@
-# vosklivesubtitle <a href="https://pypi.org/project/vosklivesubtitle/0.0.1/"><img src="https://img.shields.io/pypi/v/vosklivesubtitle.svg"></img></a>
+# pyvosklivesubtitle <a href="https://pypi.org/project/pyvosklivesubtitle/0.0.1/"><img src="https://img.shields.io/pypi/v/pyvosklivesubtitle.svg"></img></a>
 
 ### A Python based desktop aplication which can recognize any live streaming in 21 languages then translate and display it as LIVE SUBTITLES
 
@@ -13,15 +13,15 @@ If you don't have python on your system you can get compiled version from this r
 if python has already installed on your system you can install this script with pip
 
 ```
-pip install vosklivesubtitle
+pip install pyvosklivesubtitle
 ```
 
 you can compile this script into a single executable file with pyinstaller by renaming
-```__init__.py``` file to ```vosklivesubtitle.pyw``` and type :
+```__init__.py``` file to ```pyvosklivesubtitle.pyw``` and type :
 
 ```
 pip install pyinstaller
-pyinstaller --onefile vosklivesubtitle.pyw
+pyinstaller --onefile pyvosklivesubtitle.pyw
 ```
 
 The executable compiled file will be placed by pyinstaller into dist subfolder of your current working folder, then you can just
@@ -44,9 +44,9 @@ If you failed when installing any python modules you can always use this way, ge
 ### Usage
 
 ```
-vosklivesubtitle [-S SRC_LANGUAGE] [-D DST_LANGUAGE]
+pyvosklivesubtitle [-S SRC_LANGUAGE] [-D DST_LANGUAGE]
 
-for example : vosklivesubtitle -S ja -D en
+for example : pyvosklivesubtitle -S ja -D en
 
 options:
   -h, --help            show this help message and exit
