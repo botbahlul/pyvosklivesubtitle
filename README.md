@@ -28,19 +28,10 @@ When you run this app for the very first time it may takes some times to downloa
 You can always download those small models manually from https://alphacephei.com/vosk/models then extract them to that used folder.
 
 If you're on windows you can compile that script in win folder into a single executable file with pyinstaller :
-
-On windows you will need Stereo Mix or Virtual Audio Cable as recording device for best recognizing performance
-
-On linux the only choice is using pavucontrol by choosing MONITOR of your audio device as INPUT DEVICE
-
-![image](https://user-images.githubusercontent.com/88623122/199517907-76d61acb-3f07-49b6-8f2f-4b6a2b787eff.png)
-
-
 ```
 pip install pyinstaller
 pyinstaller --onefile pyvls.py
 ```
-
 The executable compiled file will be placed by pyinstaller into dist subfolder of your current working folder, then you can just
 rename and put that compiled exe file into a folder that has been added to your PATH ENVIRONTMENT so you can execute it from anywhere.
 
@@ -57,9 +48,11 @@ python setup.py build
 python setup.py install
 ```
 
-
 If you fail when installing any python modules using pip, you can always use this way, get that module from github then build them manually
 
+For best recognizing performance, on windows you will need STEREO MIX or VIRTUAL AUDIO CABLE as recording/input device and on linux you willl need PAVUCONTROL (by choosing MONITOR of your audio device as INPUT DEVICE)
+
+![image](https://user-images.githubusercontent.com/88623122/199517907-76d61acb-3f07-49b6-8f2f-4b6a2b787eff.png)
 
 ### Usage
 
