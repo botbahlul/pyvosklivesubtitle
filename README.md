@@ -27,7 +27,7 @@ When you run this app for the very first time it may takes some times to downloa
 
 You can always download those small models manually from https://alphacephei.com/vosk/models then extract it to that used folder
 
-if you're windows user you can compile script in win folder into a single executable file with pyinstaller :
+If you're on windows you can compile that script in win folder into a single executable file with pyinstaller :
 
 ```
 pip install pyinstaller
