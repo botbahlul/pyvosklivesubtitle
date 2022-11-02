@@ -10,9 +10,9 @@ The GUI part is using pysimplegui https://github.com/PySimpleGUI/PySimpleGUI
 
 ### Installation
 
-If you don't have python on your system you can get compiled version from this release page assets.
+If you don't have python on your OS you can get compiled version from this release page assets.
 
-If python has already installed on your system you can install this script with pip :
+If python has already installed on your OS you can install this script with pip :
 
 ```
 pip install pyvosklivesubtitle
@@ -27,16 +27,14 @@ When you run this app for the very first time it may takes some times to downloa
 
 You can always download those small models manually from https://alphacephei.com/vosk/models then extract them to that used folder.
 
-If you're on windows you can compile that script in win folder into a single executable file with pyinstaller :
+You can try to compile that script in win folder (if your OS is Windows) or linux folder (if your OS is Linux) into a single executable file with pyinstaller :
 ```
 pip install pyinstaller
 pyinstaller --onefile pyvls.py
 ```
-The executable compiled file will be placed by pyinstaller into dist subfolder of your current working folder, then you can just
-rename and put that compiled exe file into a folder that has been added to your PATH ENVIRONTMENT so you can execute it from anywhere.
+The executable compiled file will be placed by pyinstaller into dist subfolder of your current working folder, then you can just put that compiled exe file into a folder that has been added to your PATH ENVIRONTMENT so you can execute it from anywhere.
 
-DONT FORGET TO PLACE THOSE 4 LIBS FILES FROM VOSK (libgcc_s_seh-1.dll, libstdc++-6.dll, libvosk.dll, & libwinpthread-1.dll) into
-same folder with compiled exe file
+DONT FORGET TO PLACE THOSE LIBS FILES FROM VOSK (libgcc_s_seh-1.dll, libstdc++-6.dll, libvosk.dll, & libwinpthread-1.dll if your OS is Windows, libvosk.so if your OS is Linux) into same folder with compiled exe file
 
 I was succesfuly compiled it in Windows 10 with pyinstaller-5.1 and Pyhton-3.10.4, and python-3.8.12 in Debian 9
 
@@ -50,7 +48,7 @@ python setup.py install
 
 If you fail when installing any python modules using pip, you can always use this way, get that module from github then build them manually
 
-For best recognizing performance, on windows you will need STEREO MIX or VIRTUAL AUDIO CABLE as recording/input device and on linux you willl need PAVUCONTROL (by choosing MONITOR of your audio device as INPUT DEVICE)
+For best recognizing performance, on windows you will need STEREO MIX or VIRTUAL AUDIO CABLE as RECORDING/INPUT DEVICE and on linux you willl need PAVUCONTROL (by choosing MONITOR of your audio device as INPUT DEVICE)
 
 ![image](https://user-images.githubusercontent.com/88623122/199517907-76d61acb-3f07-49b6-8f2f-4b6a2b787eff.png)
 
