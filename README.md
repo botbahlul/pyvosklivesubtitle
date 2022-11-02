@@ -29,6 +29,13 @@ You can always download those small models manually from https://alphacephei.com
 
 If you're on windows you can compile that script in win folder into a single executable file with pyinstaller :
 
+On windows you will need Stereo Mix or Virtual Audio Cable as recording device for best recognizing performance
+
+On linux the only choice is using pavucontrol by choosing MONITOR of your audio device
+
+![image](https://user-images.githubusercontent.com/88623122/199517907-76d61acb-3f07-49b6-8f2f-4b6a2b787eff.png)
+
+
 ```
 pip install pyinstaller
 pyinstaller --onefile pyvls.py
