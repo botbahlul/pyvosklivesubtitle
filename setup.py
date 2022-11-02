@@ -1,0 +1,49 @@
+#!/usr/bin/env python3
+from __future__ import unicode_literals
+
+import sys
+import os
+import stat
+
+#from setuptools import setup
+#from setuptools.command.install import install
+#from distutils import log
+
+try:
+    from setuptools import setup
+except ImportError:
+    from distutils.core import setup
+
+
+if sys.version_info < (2, 6):
+    print("THIS MODULE REQUIRES PYTHON 2.6, 2.7, OR 3.3+. YOU ARE CURRENTLY USING PYTHON {0}".format(sys.version))
+    sys.exit(1)
+
+
+long_description = (
+    'pyvosklivesubtitle is a python based desktop aplication similar to Google Translate web aplication,'
+    'with an extra feature LIVE SUBTITLE which can display subtitle translation for live streams'
+    'in 21 languages that supported by VOSK'
+    )
+
+setup(
+    name="pyvosklivesubtitle",
+    version="0.0.1",
+    include_package_data=True,
+    author='Bot Bahlul',
+    author_email='bot.bahlul@gmail.com',
+    url='https://github.com/botbahlul/pyvosklivesubtitle',
+    packages=[str('pyvosklivesubtitle')],
+    entry_points={
+        'console_scripts': [
+            'pyvosklivesubtitle = pyvosklivesubtitle:main',
+        ],
+    },
+    install_requires=[
+        'sounddevice>=0.4.4'
+        'vosk>=0.3.44',
+        'googletrans==4.0.0-rc1',
+        'pysimplegui>=4.60.1',
+    ],
+    license=open("LICENSE").read()
+)
