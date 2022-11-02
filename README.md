@@ -23,7 +23,7 @@ then you can run it by just type
 pyvosklivesubtitle
 ```
 
-When you run this app for the very first time it may takes some times to download vosk language model, you can check  downloaded models in "C:\\<Username>\.cache\vosk\" or "C:\\<Username>\AppData\Local\vosk\"
+When you run this app for the very first time it may takes some times to download vosk language model, you can check  downloaded models in "C:\Username\.cache\vosk\" or "C:\Username\AppData\Local\vosk\"
 
 You can always downloaad those models manually from https://alphacephei.com/vosk/modelsthen extract it to that used folder
 
