@@ -1,6 +1,6 @@
 # vosklivesubtitle <a href="https://pypi.org/project/vosklivesubtitle/0.0.1/"><img src="https://img.shields.io/pypi/v/vosklivesubtitle.svg"></img></a>
 
-### A Python based desktop aplication similar to Google Translate with an extra feature LIVE SUBTITLES
+### A Python based desktop aplication which can recognize any live streaming in 21 languages then translate and display it as LIVE SUBTITLES
 
 the translation part is using googletrans==4.0.0-rc1
 
