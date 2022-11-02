@@ -12,20 +12,20 @@ The GUI part is using pysimplegui https://github.com/PySimpleGUI/PySimpleGUI
 
 If you don't have python on your system you can get compiled version from this release page assets.
 
-If python has already installed on your system you can install this script with pip
+If python has already installed on your system you can install this script with pip :
 
 ```
 pip install pyvosklivesubtitle
 ```
 
-then you can run it by just type 
+then you can run it by just type :
 ```
 pyvosklivesubtitle
 ```
 
-When you run this app for the very first time it may takes some times to download vosk language model, you can check  downloaded models in "C:\Username\\.cache\vosk\\" or "C:\Username\AppData\Local\vosk\\"
+When you run this app for the very first time it may takes some times to download vosk language model, you can check those  downloaded models in "/usr/share/vosk" (if you're on Linux) and "C:\Username\\.cache\vosk\\" or "C:\Username\AppData\Local\vosk\\" (if you're on Windows).
 
-You can always download those small models manually from https://alphacephei.com/vosk/models then extract it to that used folder
+You can always download those small models manually from https://alphacephei.com/vosk/models then extract them to that used folder.
 
 If you're on windows you can compile that script in win folder into a single executable file with pyinstaller :
 
