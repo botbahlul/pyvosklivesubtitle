@@ -76,9 +76,6 @@ options:
 
 Those command line switches are just to make this application directly select the language in combo box, so it's okay if you don't use them
 
-The language codes are just as same as language codes in googletrans
-
-
 ### License
 
 MIT
