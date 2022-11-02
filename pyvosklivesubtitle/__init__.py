@@ -21,73 +21,73 @@ Filename = None
 recognizing = False
 
 arraylist_models = []
-arraylist_models.append("en-us")
+arraylist_models.append("ca-es");
 arraylist_models.append("zh-cn")
-arraylist_models.append("ru-ru");
+arraylist_models.append("cs-cz");
+arraylist_models.append("nl-nl");
+arraylist_models.append("en-us")
+arraylist_models.append("eo-eo");
 arraylist_models.append("fr-fr");
 arraylist_models.append("de-de");
-arraylist_models.append("es-es");
-arraylist_models.append("pt-pt");
-arraylist_models.append("tr-tr");
-arraylist_models.append("vi-vn");
-arraylist_models.append("it-it");
-arraylist_models.append("nl-nl");
-arraylist_models.append("ca-es");
-arraylist_models.append("fa-ir");
-arraylist_models.append("uk-ua");
-arraylist_models.append("kk-kz");
-arraylist_models.append("sv-se");
-arraylist_models.append("ja-jp");
-arraylist_models.append("eo-eo");
 arraylist_models.append("hi-in");
-arraylist_models.append("cs-cz");
+arraylist_models.append("it-it");
+arraylist_models.append("ja-jp");
+arraylist_models.append("kk-kz");
+arraylist_models.append("fa-ir");
 arraylist_models.append("pl-pl");
+arraylist_models.append("pt-pt");
+arraylist_models.append("ru-ru");
+arraylist_models.append("es-es");
+arraylist_models.append("sv-se");
+arraylist_models.append("tr-tr");
+arraylist_models.append("uk-ua");
+arraylist_models.append("vi-vn");
 
 arraylist_src = []
-arraylist_src.append("en")
+arraylist_src.append("ca")
 arraylist_src.append("zh")
-arraylist_src.append("ru")
+arraylist_src.append("cs")
+arraylist_src.append("nl")
+arraylist_src.append("en")
+arraylist_src.append("eo")
 arraylist_src.append("fr")
 arraylist_src.append("de")
-arraylist_src.append("es")
-arraylist_src.append("pt")
-arraylist_src.append("tr")
-arraylist_src.append("vi")
-arraylist_src.append("it")
-arraylist_src.append("nl")
-arraylist_src.append("ca")
-arraylist_src.append("fa")
-arraylist_src.append("uk")
-arraylist_src.append("kk")
-arraylist_src.append("sv")
-arraylist_src.append("ja")
-arraylist_src.append("eo")
 arraylist_src.append("hi")
-arraylist_src.append("cs")
+arraylist_src.append("it")
+arraylist_src.append("ja")
+arraylist_src.append("kk")
+arraylist_src.append("fa")
 arraylist_src.append("pl")
+arraylist_src.append("pt")
+arraylist_src.append("ru")
+arraylist_src.append("es")
+arraylist_src.append("sv")
+arraylist_src.append("tr")
+arraylist_src.append("uk")
+arraylist_src.append("vi")
 
 arraylist_src_languages = []
-arraylist_src_languages.append("English")
+arraylist_src_languages.append("Catalan")
 arraylist_src_languages.append("Chinese")
-arraylist_src_languages.append("Russian")
+arraylist_src_languages.append("Czech")
+arraylist_src_languages.append("Dutch")
+arraylist_src_languages.append("English")
+arraylist_src_languages.append("Esperanto")
 arraylist_src_languages.append("French")
 arraylist_src_languages.append("German")
-arraylist_src_languages.append("Spanish")
-arraylist_src_languages.append("Portuguese")
-arraylist_src_languages.append("Turkish")
-arraylist_src_languages.append("Vietnamese")
-arraylist_src_languages.append("Italian")
-arraylist_src_languages.append("Dutch")
-arraylist_src_languages.append("Catalan")
-arraylist_src_languages.append("Persian")
-arraylist_src_languages.append("Ukrainian")
-arraylist_src_languages.append("Kazakh")
-arraylist_src_languages.append("Swedish")
-arraylist_src_languages.append("Japanese")
-arraylist_src_languages.append("Esperanto")
 arraylist_src_languages.append("Hindi")
-arraylist_src_languages.append("Czech")
+arraylist_src_languages.append("Italian")
+arraylist_src_languages.append("Japanese")
+arraylist_src_languages.append("Kazakh")
+arraylist_src_languages.append("Persian")
 arraylist_src_languages.append("Polish")
+arraylist_src_languages.append("Portuguese")
+arraylist_src_languages.append("Russian")
+arraylist_src_languages.append("Spanish")
+arraylist_src_languages.append("Swedish")
+arraylist_src_languages.append("Turkish")
+arraylist_src_languages.append("Ukrainian")
+arraylist_src_languages.append("Vietnamese")
 
 map_model_language = dict(zip(arraylist_src_languages, arraylist_models))
 map_src_of_language = dict(zip(arraylist_src_languages, arraylist_src))
@@ -593,8 +593,6 @@ def make_overlay_translation_window(translated_text):
     mlszx=len(translated_text)
     mlszy=nl
 
-    TRANSPARENT_BLACK='#add123'
-
     layout = [[sg.Multiline(default_text=translated_text, size=(mlszx, mlszy), text_color='yellow1', border_width=0,
         background_color='white', no_scrollbar=True,
         justification='l', expand_x=True, expand_y=True,  key='-ML-LS2-')]]
@@ -733,7 +731,6 @@ def main():
 
         elif event == '-START-BUTTON-':
             recognizing = not recognizing
-            print(recognizing)
 
             #print('Start button clicked, changing recognizing status')
             #print('recognizing =', recognizing)
