@@ -49,7 +49,7 @@ a folder), and then just type :
 python setup.py build
 python setup.py install
 ```
-``  
+
 
 If you failed when installing any python modules you can always use this way, get that module from github then build them manually
 
