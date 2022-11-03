@@ -1,8 +1,6 @@
-# pyvosklivesubtitle <a href="https://pypi.org/project/pyvosklivesubtitle/0.0.1/"><img src="https://img.shields.io/pypi/v/pyvosklivesubtitle.svg"></img></a>
+# pyvosklivesubtitle <a href="https://pypi.org/project/pyvosklivesubtitle/0.0.4/"><img src="https://img.shields.io/pypi/v/pyvosklivesubtitle.svg"></img></a>
 
 ### A Python based desktop aplication that can RECOGNIZE any live streaming in 21 languages that supported by VOSK then TRANSLATE and display it as LIVE SUBTITLES
-
-https://user-images.githubusercontent.com/88623122/199567577-a1cbbd0c-f87f-49ba-9f46-7fb6c021ee9b.mp4
 
 The speech recognition part is using vosk https://alphacephei.com/vosk/
 
