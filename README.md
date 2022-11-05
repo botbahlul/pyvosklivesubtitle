@@ -56,7 +56,7 @@ For best recognizing performance, on windows you will need STEREO MIX or VIRTUAL
 and on linux you willl need PAVUCONTROL (by choosing MONITOR of your audio device as INPUT DEVICE)
 ![image](https://user-images.githubusercontent.com/88623122/199517907-76d61acb-3f07-49b6-8f2f-4b6a2b787eff.png)
 
-To DRAG or MOVE that TRANSLATION TEXT anywhere on the screen, just USE CONTROL KEY and LEFT MOUSE combination.
+To DRAG/MOVE that TRANSLATION TEXT anywhere on the screen, just USE CONTROL KEY + LEFT MOUSE combination.
 
 ### Usage
 
