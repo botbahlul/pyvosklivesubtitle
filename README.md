@@ -3,22 +3,21 @@
 ### A Python based desktop aplication that can RECOGNIZE any live streaming in 21 languages that supported by VOSK then TRANSLATE and display it as LIVE SUBTITLES
 
 The speech recognition part is using vosk python module https://pypi.org/project/vosk/
-
-You can install it with :
 ```
 pip install --upgrade vosk
 ```
 
 The translation part is using googletrans==4.0.0-rc1
+```
+pip install googletrans==4.0.0-rc1
+```
 
 The GUI part is using pysimplegui https://github.com/PySimpleGUI/PySimpleGUI
+```
+pip install --upgrade pysimplegui
+```
 
 ### Installation
-
-If you don't have python on your OS you can get compiled version from this release page assets.
-
-If python has already installed on your OS you can install this script with pip :
-
 ```
 pip install pyvosklivesubtitle
 ```
@@ -27,6 +26,9 @@ then you can run it by just type :
 ```
 pyvosklivesubtitle
 ```
+
+If you don't have python on your OS you can get compiled version from this release page assets.
+
 
 When you run this app for the very first time it may takes some times to download vosk language model, you can check those  downloaded models in "/usr/share/vosk" (if you're on Linux) and "C:\Username\\.cache\vosk\\" or "C:\Username\AppData\Local\vosk\\" (if you're on Windows).
 
