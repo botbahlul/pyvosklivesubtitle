@@ -473,7 +473,7 @@ def steal_focus():
         overlay_translation_window=None
     if(sys.platform == "win32"):
         main_window.TKroot.attributes('-topmost', True)
-        main_window.TKroot.attributes('-topmost', False)
+        #main_window.TKroot.attributes('-topmost', False)
         main_window.TKroot.deiconify()
     if(sys.platform == "linux"):
         #main_window.TKroot.attributes('-topmost', 1)
@@ -533,10 +533,10 @@ def make_overlay_voice_window(voice_text):
 
     overlay_voice_window.set_alpha(0.6)
 
-    if not (sys.platform == "win32"):
-        overlay_voice_window.TKroot.attributes('-type', 'splash')
-        overlay_voice_window.TKroot.attributes('-topmost', 1)
-        overlay_voice_window.TKroot.attributes('-topmost', 0)
+    #if not (sys.platform == "win32"):
+        #overlay_voice_window.TKroot.attributes('-type', 'splash')
+    overlay_voice_window.TKroot.attributes('-topmost', 1)
+    #overlay_voice_window.TKroot.attributes('-topmost', 0)
 
     #TIMEOUT=50*len(voice_text)
     TIMEOUT=500
@@ -603,10 +603,10 @@ def make_overlay_translation_window(translated_text):
     #overlay_translation_window['-ML-LS2-'].print(translated_text)
     #overlay_translation_window.set_alpha(0.6)
 
-    if not (sys.platform == "win32"):
-        overlay_translation_window.TKroot.attributes('-type', 'splash')
-        overlay_translation_window.TKroot.attributes('-topmost', 1)
-        overlay_translation_window.TKroot.attributes('-topmost', 0)
+    #if not (sys.platform == "win32"):
+        #overlay_translation_window.TKroot.attributes('-type', 'splash')
+    overlay_translation_window.TKroot.attributes('-topmost', 1)
+    #overlay_translation_window.TKroot.attributes('-topmost', 0)
 
     #TIMEOUT=50*len(translated_text)
     #TIMEOUT=5000
