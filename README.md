@@ -94,3 +94,5 @@ Those command line switches are just to make this application directly select th
 ### License
 
 MIT
+
+Check my other SPEECH RECOGNITIION + TRANSLATE PROJECTS in https://github.com/botbahlul/botbahlul.github.io
