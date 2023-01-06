@@ -9,7 +9,7 @@ pip install --upgrade vosk
 
 The translation part is using pygoogletranslation
 ```
-pip install pygoogletranslation
+pip install --upgrade pygoogletranslation
 ```
 
 The GUI part is using pysimplegui https://github.com/PySimpleGUI/PySimpleGUI
@@ -19,7 +19,7 @@ pip install --upgrade pysimplegui
 
 ### Installation
 ```
-pip install pyvosklivesubtitle
+pip install --upgrade pyvosklivesubtitle
 ```
 
 then you can run it by just type :
