@@ -5,7 +5,7 @@ from threading import Timer
 import argparse
 import sounddevice as sd
 import json
-from googletrans import Translator
+from pygoogletranslation import Translator
 import PySimpleGUI as sg
 try:
     import queue  # Python 3 import
