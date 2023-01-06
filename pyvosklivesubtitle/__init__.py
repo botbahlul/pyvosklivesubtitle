@@ -6,7 +6,7 @@ import argparse
 import sounddevice as sd
 from vosk import Model, KaldiRecognizer
 import json
-from googletrans import Translator
+from pygoogletranslation import Translator
 import PySimpleGUI as sg
 try:
     import queue  # Python 3 import
