@@ -28,7 +28,7 @@ long_description = (
 setup(
     name="pyvosklivesubtitle",
     description="A Python based desktop aplication that can RECOGNIZE any live streaming in 21 languages that supported by VOSK then TRANSLATE and display it as LIVE SUBTITLES",
-    version="0.0.4",
+    version="0.0.5",
     include_package_data=True,
     author='Bot Bahlul',
     author_email='bot.bahlul@gmail.com',
@@ -42,7 +42,7 @@ setup(
     install_requires=[
         'sounddevice>=0.4.4',
         'vosk>=0.3.44',
-        'googletrans==4.0.0-rc1',
+        'pygoogletranslation>=2.0.6',
         'pysimplegui>=4.60.1',
     ],
     license=open("LICENSE").read()
