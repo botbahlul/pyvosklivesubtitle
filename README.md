@@ -7,7 +7,7 @@ The speech recognition part is using vosk python module https://pypi.org/project
 pip install --upgrade vosk
 ```
 
-The translation part is using pygoogletranslation
+The translation part is using pygoogletranslation module https://github.com/Saravananslb/py-googletranslation
 ```
 pip install --upgrade pygoogletranslation
 ```
