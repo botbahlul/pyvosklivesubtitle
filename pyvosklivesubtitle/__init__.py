@@ -450,7 +450,7 @@ def translate(phrase, src, dest):
 def timed_translate(src, dst):
     global main_window
 
-    WAIT_SECONDS=0.2
+    WAIT_SECONDS=0.15
     phrase = str(main_window['-ML1-'].get())
     if (len(phrase)>0):
         translated_text = translate(phrase, src, dst)
@@ -525,13 +525,31 @@ def make_overlay_voice_window(voice_text):
     mlszx=len(voice_text)
     mlszy=nl
 
-    layout = [[sg.Multiline(default_text=voice_text, size=(mlszx, mlszy), text_color='yellow1', border_width=0, background_color='black', no_scrollbar=True,
-        justification='c', expand_x=True, expand_y=True,  key='-ML-LS1-')]]
+    if not (sys.platform == "win32"):
+        layout = [[sg.Multiline(default_text=translated_text, size=(mlszx, mlszy), text_color='yellow1', border_width=0,
+            background_color='black', no_scrollbar=True, justification='l', expand_x=True, expand_y=True,  key='-ML-LS1-')]]
 
-    overlay_voice_window = sg.Window('voice_text', layout, no_titlebar=True, keep_on_top=True, background_color='black', size=(wszx,wszy), location=(wx,wy), 
-        margins=(0, 0), return_keyboard_events=True, finalize=True)
+        overlay_voice_window = sg.Window('voice_text', layout, no_titlebar=True, keep_on_top=True, size=(wszx,wszy), location=(wx,wy), 
+            margins=(0, 0), background_color='black', alpha_channel=0.7, return_keyboard_events=True, finalize=True)
 
-    overlay_voice_window.set_alpha(0.6)
+        overlay_translation_window.TKroot.attributes('-type', 'splash')
+        overlay_translation_window.TKroot.attributes('-topmost', 1)
+        #overlay_translation_window.TKroot.attributes('-topmost', 0)
+    else:
+        layout = [[sg.Multiline(default_text=voice_text, size=(mlszx, mlszy), text_color='yellow1', border_width=0,
+            background_color='white', no_scrollbar=True, justification='l', expand_x=True, expand_y=True,  key='-ML-LS1-')]]
+
+        overlay_voice_window = sg.Window('voice_text', layout, no_titlebar=True, keep_on_top=True, size=(wszx,wszy), location=(wx,wy), 
+            margins=(0, 0), background_color='white', transparent_color='white', grab_anywhere=True, return_keyboard_events=True, 
+            finalize=True)
+
+    #layout = [[sg.Multiline(default_text=voice_text, size=(mlszx, mlszy), text_color='yellow1', border_width=0, 
+        #background_color='black', no_scrollbar=True, justification='c', expand_x=True, expand_y=True,  key='-ML-LS1-')]]
+
+    #overlay_voice_window = sg.Window('voice_text', layout, no_titlebar=True, keep_on_top=True, background_color='black', size=(wszx,wszy), location=(wx,wy), 
+        #margins=(0, 0), return_keyboard_events=True, finalize=True)
+
+    #overlay_voice_window.set_alpha(0.6)
 
     if not (sys.platform == "win32"):
         overlay_voice_window.TKroot.attributes('-type', 'splash')
@@ -539,7 +557,7 @@ def make_overlay_voice_window(voice_text):
         overlay_voice_window.TKroot.attributes('-topmost', 0)
 
     #TIMEOUT=50*len(voice_text)
-    TIMEOUT=500
+    #TIMEOUT=500
 
     #event, values = overlay_voice_window.read(timeout=TIMEOUT, close=True)
     event, values = overlay_voice_window.read(500)
@@ -552,8 +570,9 @@ def make_overlay_translation_window(translated_text):
     columns, rows = os.get_terminal_size()
 
     FONT_TYPE='Arial'
-    if xmax>1280: FONT_SIZE=14
-    if xmax<=1280: FONT_SIZE=16
+    #if xmax>1280: FONT_SIZE=14
+    #if xmax<=1280: FONT_SIZE=16
+    FONT_SIZE=16
 
     if len(translated_text)<=96:
         wszx=int(9.9*(xmax/1280)*len(translated_text) + 60)
@@ -585,7 +604,7 @@ def make_overlay_translation_window(translated_text):
         wy=int((528-(nl-1)*28)*ymax/720)
     #wy=int((528-(nl-1)*28)*ymax/720)
 
-    if xmax>1280: FONT_SIZE=14
+    if xmax>1280: FONT_SIZE=16
     if xmax<=1280: FONT_SIZE=16
 
     sg.set_options(font=("Arial", FONT_SIZE))
@@ -593,20 +612,27 @@ def make_overlay_translation_window(translated_text):
     mlszx=len(translated_text)
     mlszy=nl
 
-    layout = [[sg.Multiline(default_text=translated_text, size=(mlszx, mlszy), text_color='yellow1', border_width=0,
-        background_color='white', no_scrollbar=True,
-        justification='l', expand_x=True, expand_y=True,  key='-ML-LS2-')]]
-
-    overlay_translation_window = sg.Window('text', layout, no_titlebar=True, keep_on_top=True, size=(wszx,wszy), location=(wx,wy),  
-        margins=(0, 0), background_color='white', transparent_color='white',return_keyboard_events=True, finalize=True)
-
-    #overlay_translation_window['-ML-LS2-'].print(translated_text)
-    #overlay_translation_window.set_alpha(0.6)
+    TRANSPARENT_BLACK='#add123'
 
     if not (sys.platform == "win32"):
+        layout = [[sg.Multiline(default_text=translated_text, size=(mlszx, mlszy), text_color='yellow1', border_width=0,
+            background_color='black', no_scrollbar=True,
+            justification='l', expand_x=True, expand_y=True,  key='-ML-LS2-')]]
+
+        overlay_translation_window = sg.Window('text', layout, no_titlebar=True, keep_on_top=True, size=(wszx,wszy), location=(wx,wy), 
+            margins=(0, 0), background_color='black', alpha_channel=0.7, return_keyboard_events=True, finalize=True)
+
         overlay_translation_window.TKroot.attributes('-type', 'splash')
         overlay_translation_window.TKroot.attributes('-topmost', 1)
-        overlay_translation_window.TKroot.attributes('-topmost', 0)
+        #overlay_translation_window.TKroot.attributes('-topmost', 0)
+    else:
+        layout = [[sg.Multiline(default_text=translated_text, size=(mlszx, mlszy), text_color='yellow1', border_width=0,
+            background_color='white', no_scrollbar=True,
+            justification='l', expand_x=True, expand_y=True,  key='-ML-LS2-')]]
+
+        overlay_translation_window = sg.Window('Translation', layout, no_titlebar=True, keep_on_top=True, size=(wszx,wszy), location=(wx,wy), 
+            margins=(0, 0), background_color='white', transparent_color='white', grab_anywhere=True, return_keyboard_events=True, 
+            finalize=True)
 
     #TIMEOUT=50*len(translated_text)
     #TIMEOUT=5000
@@ -638,8 +664,8 @@ def main():
     parser.add_argument("-f", "--filename", type=str, metavar="FILENAME", help="audio file to store recording to")
     parser.add_argument("-d", "--device", type=int_or_str, help="input device (numeric ID or substring)")
     parser.add_argument("-r", "--samplerate", type=int, help="sampling rate in Hertz for example 8000, 16000, 44100, or 48000")
+    parser.add_argument('-v', '--version', action='version', version='0.0.6')
     args = parser.parse_args(remaining)
-
     args = parser.parse_args()
 
     if args.src_language:
@@ -711,7 +737,7 @@ def main():
         main_window.TKroot.attributes('-topmost', 1)
         main_window.TKroot.attributes('-topmost', 0)
 
-    overlay_voice_window, overlay_translation_window = None, None
+    overlay_translation_window = None
     recognizing = False
 
 
@@ -731,7 +757,6 @@ def main():
 
         elif event == '-START-BUTTON-':
             recognizing = not recognizing
-
             #print('Start button clicked, changing recognizing status')
             #print('recognizing =', recognizing)
             main_window['-START-BUTTON-'].update(('Stop','Start')[not recognizing], button_color=(('white', ('red', '#283b5b')[not recognizing])))
@@ -740,14 +765,12 @@ def main():
                 #print('VOSK Live Subtitle is START LISTENING now')
                 #print('recognizing =', recognizing)
 
-                #main_window['-START-BUTTON-'].update(text='Stop', button_color=('red'))
+                if not overlay_translation_window:
+                    overlay_translation_window = make_overlay_translation_window(100*' ')
+                    overlay_translation_window.Hide()
 
                 listening_thread=threading.Thread(target=listen_worker_thread, args=(src,dst), daemon=True)
                 listening_thread.start()
-
-
-                #if not overlay_voice_window: overlay_voice_window = make_overlay_voice_window(100*' ')
-                if not overlay_translation_window: overlay_translation_window = make_overlay_translation_window(100*' ')
 
                 timer = threading.Thread(target=timed_translate, args=(src, dst), daemon=True)
                 timer.start()
@@ -756,13 +779,11 @@ def main():
                 #print('VOSK Live Subtitle is STOP LISTENING now')
                 #print('recognizing =', recognizing)
 
-                #main_window['-START-BUTTON-'].update(text='Start', button_color=('white', '#283b5b'))
-
                 text=''
+                main_window['-ML1-'].update(text,background_color_for_value='yellow1',autoscroll=True)
+                translated_text=''
+                main_window['-ML2-'].update(translated_text,background_color_for_value='yellow1',autoscroll=True)
 
-                if overlay_voice_window:
-                    overlay_voice_window.close()
-                    overlay_voice_window=None
                 if overlay_translation_window:
                     overlay_translation_window.close()
                     overlay_translation_window=None
@@ -784,6 +805,7 @@ def main():
 
 
         elif event=='-VOICE-TRANSLATED-' and recognizing==True:
+            overlay_translation_window.UnHide()
             translated_text=str(values[event]).strip().lower()
             main_window['-ML2-'].update(translated_text,background_color_for_value='yellow1',autoscroll=True)
             
