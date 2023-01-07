@@ -87,6 +87,7 @@ options:
                         input device (numeric ID or substring)
   -r SAMPLERATE, --samplerate SAMPLERATE
                         sampling rate in Hertz for example 8000, 16000, 44100, or 48000
+  -v, --version         show program's version number and exit
 ```
 
 Those command line switches are just to make this application directly select the language in combo box, so it's okay if you don't use them
