@@ -30,7 +30,7 @@ pyvosklivesubtitle
 If you don't have python on your OS you can get compiled version from this release page assets.
 
 
-When you run this app for the very first time it may takes some times to download vosk language model, you can check those  downloaded models in "/usr/share/vosk" (if you're on Linux) and "C:\Username\\.cache\vosk\\" or "C:\Username\AppData\Local\vosk\\" (if you're on Windows).
+When you run this app for the very first time it may takes some times to download vosk language model, you can check those  downloaded models in "/usr/share/vosk" (if you're on Linux) and "C:\User\<Username>\.cache\vosk\\" or "C:\Username\AppData\Local\vosk\\" (if you're on Windows).
 
 You can always download those small models manually from https://alphacephei.com/vosk/models then extract them to that used folder.
 
