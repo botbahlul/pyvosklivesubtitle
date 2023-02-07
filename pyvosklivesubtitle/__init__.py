@@ -177,7 +177,7 @@ arraylist_dst.append("mr");
 arraylist_dst.append("mni");
 arraylist_dst.append("lus");
 arraylist_dst.append("mn");
-arraylist_dst.append("mmr");
+arraylist_dst.append("my");
 arraylist_dst.append("ne");
 arraylist_dst.append("no");
 arraylist_dst.append("or");
