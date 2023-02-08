@@ -94,138 +94,138 @@ map_src_of_language = dict(zip(arraylist_src_languages, arraylist_src))
 map_language_of_src = dict(zip(arraylist_src, arraylist_src_languages))
 
 arraylist_dst = []
-arraylist_dst.append("af");
-arraylist_dst.append("sq");
-arraylist_dst.append("am");
-arraylist_dst.append("ar");
-arraylist_dst.append("hy");
-arraylist_dst.append("as");
-arraylist_dst.append("ay");
-arraylist_dst.append("az");
-arraylist_dst.append("bm");
-arraylist_dst.append("eu");
-arraylist_dst.append("be");
-arraylist_dst.append("bn");
-arraylist_dst.append("bho");
-arraylist_dst.append("bs");
-arraylist_dst.append("bg");
-arraylist_dst.append("ca");
-arraylist_dst.append("ceb");
-arraylist_dst.append("ny");
-arraylist_dst.append("zh-CN");
-arraylist_dst.append("zh-TW");
-arraylist_dst.append("co");
-arraylist_dst.append("cr");
-arraylist_dst.append("cs");
-arraylist_dst.append("da");
-arraylist_dst.append("dv");
-arraylist_dst.append("nl");
-arraylist_dst.append("doi");
-arraylist_dst.append("en");
-arraylist_dst.append("eo");
-arraylist_dst.append("et");
-arraylist_dst.append("ee");
-arraylist_dst.append("fil");
-arraylist_dst.append("fi");
-arraylist_dst.append("fr");
-arraylist_dst.append("fy");
-arraylist_dst.append("gl");
-arraylist_dst.append("ka");
-arraylist_dst.append("de");
-arraylist_dst.append("el");
-arraylist_dst.append("gn");
-arraylist_dst.append("gu");
-arraylist_dst.append("ht");
-arraylist_dst.append("ha");
-arraylist_dst.append("haw");
-arraylist_dst.append("he");
-arraylist_dst.append("hi");
-arraylist_dst.append("hmn");
-arraylist_dst.append("hu");
-arraylist_dst.append("is");
-arraylist_dst.append("ig");
-arraylist_dst.append("ilo");
-arraylist_dst.append("id");
-arraylist_dst.append("ga");
-arraylist_dst.append("it");
-arraylist_dst.append("ja");
-arraylist_dst.append("jv");
-arraylist_dst.append("kn");
-arraylist_dst.append("kk");
-arraylist_dst.append("km");
-arraylist_dst.append("rw");
-arraylist_dst.append("kok");
-arraylist_dst.append("ko");
-arraylist_dst.append("kri");
-arraylist_dst.append("kmr");
-arraylist_dst.append("ckb");
-arraylist_dst.append("ky");
-arraylist_dst.append("lo");
-arraylist_dst.append("la");
-arraylist_dst.append("lv");
-arraylist_dst.append("ln");
-arraylist_dst.append("lt");
-arraylist_dst.append("lg");
-arraylist_dst.append("lb");
-arraylist_dst.append("mk");
-arraylist_dst.append("mg");
-arraylist_dst.append("ms");
-arraylist_dst.append("ml");
-arraylist_dst.append("mt");
-arraylist_dst.append("mi");
-arraylist_dst.append("mr");
-arraylist_dst.append("mni");
-arraylist_dst.append("lus");
-arraylist_dst.append("mn");
-arraylist_dst.append("my");
-arraylist_dst.append("ne");
-arraylist_dst.append("no");
-arraylist_dst.append("or");
-arraylist_dst.append("om");
-arraylist_dst.append("ps");
-arraylist_dst.append("fa");
-arraylist_dst.append("pl");
-arraylist_dst.append("pt");
-arraylist_dst.append("pa");
-arraylist_dst.append("qu");
-arraylist_dst.append("ro");
-arraylist_dst.append("ru");
-arraylist_dst.append("sm");
-arraylist_dst.append("sa");
-arraylist_dst.append("gd");
-arraylist_dst.append("nso");
-arraylist_dst.append("sr");
-arraylist_dst.append("st");
-arraylist_dst.append("sn");
-arraylist_dst.append("sd");
-arraylist_dst.append("si");
-arraylist_dst.append("sk");
-arraylist_dst.append("sl");
-arraylist_dst.append("so");
-arraylist_dst.append("es");
-arraylist_dst.append("su");
-arraylist_dst.append("sw");
-arraylist_dst.append("sv");
-arraylist_dst.append("tg");
-arraylist_dst.append("ta");
-arraylist_dst.append("tt");
-arraylist_dst.append("te");
-arraylist_dst.append("th");
-arraylist_dst.append("ti");
-arraylist_dst.append("ts");
-arraylist_dst.append("tr");
-arraylist_dst.append("tk");
-arraylist_dst.append("tw");
-arraylist_dst.append("ug");
-arraylist_dst.append("uk");
-arraylist_dst.append("ur");
-arraylist_dst.append("uz");
-arraylist_dst.append("vi");
-arraylist_dst.append("cy");
-arraylist_dst.append("xh");
-arraylist_dst.append("yi");
-arraylist_dst.append("yo");
-arraylist_dst.append("zu");
+arraylist_dst.append("af")
+arraylist_dst.append("sq")
+arraylist_dst.append("am")
+arraylist_dst.append("ar")
+arraylist_dst.append("hy")
+arraylist_dst.append("as")
+arraylist_dst.append("ay")
+arraylist_dst.append("az")
+arraylist_dst.append("bm")
+arraylist_dst.append("eu")
+arraylist_dst.append("be")
+arraylist_dst.append("bn")
+arraylist_dst.append("bho")
+arraylist_dst.append("bs")
+arraylist_dst.append("bg")
+arraylist_dst.append("ca")
+arraylist_dst.append("ceb")
+arraylist_dst.append("ny")
+arraylist_dst.append("zh-CN")
+arraylist_dst.append("zh-TW")
+arraylist_dst.append("co")
+arraylist_dst.append("hr")
+arraylist_dst.append("cs")
+arraylist_dst.append("da")
+arraylist_dst.append("dv")
+arraylist_dst.append("doi")
+arraylist_dst.append("nl")
+arraylist_dst.append("en")
+arraylist_dst.append("eo")
+arraylist_dst.append("et")
+arraylist_dst.append("ee")
+arraylist_dst.append("fil")
+arraylist_dst.append("fi")
+arraylist_dst.append("fr")
+arraylist_dst.append("fy")
+arraylist_dst.append("gl")
+arraylist_dst.append("ka")
+arraylist_dst.append("de")
+arraylist_dst.append("el")
+arraylist_dst.append("gn")
+arraylist_dst.append("gu")
+arraylist_dst.append("ht")
+arraylist_dst.append("ha")
+arraylist_dst.append("haw")
+arraylist_dst.append("he")
+arraylist_dst.append("hi")
+arraylist_dst.append("hmn")
+arraylist_dst.append("hu")
+arraylist_dst.append("is")
+arraylist_dst.append("ig")
+arraylist_dst.append("ilo")
+arraylist_dst.append("id")
+arraylist_dst.append("ga")
+arraylist_dst.append("it")
+arraylist_dst.append("ja")
+arraylist_dst.append("jv")
+arraylist_dst.append("kn")
+arraylist_dst.append("kk")
+arraylist_dst.append("km")
+arraylist_dst.append("rw")
+arraylist_dst.append("gom")
+arraylist_dst.append("ko")
+arraylist_dst.append("kri")
+arraylist_dst.append("kmr")
+arraylist_dst.append("ckb")
+arraylist_dst.append("ky")
+arraylist_dst.append("lo")
+arraylist_dst.append("la")
+arraylist_dst.append("lv")
+arraylist_dst.append("ln")
+arraylist_dst.append("lt")
+arraylist_dst.append("lg")
+arraylist_dst.append("lb")
+arraylist_dst.append("mk")
+arraylist_dst.append("mg")
+arraylist_dst.append("ms")
+arraylist_dst.append("ml")
+arraylist_dst.append("mt")
+arraylist_dst.append("mi")
+arraylist_dst.append("mr")
+arraylist_dst.append("mni-Mtei")
+arraylist_dst.append("lus")
+arraylist_dst.append("mn")
+arraylist_dst.append("my")
+arraylist_dst.append("ne")
+arraylist_dst.append("no")
+arraylist_dst.append("or")
+arraylist_dst.append("om")
+arraylist_dst.append("ps")
+arraylist_dst.append("fa")
+arraylist_dst.append("pl")
+arraylist_dst.append("pt")
+arraylist_dst.append("pa")
+arraylist_dst.append("qu")
+arraylist_dst.append("ro")
+arraylist_dst.append("ru")
+arraylist_dst.append("sm")
+arraylist_dst.append("sa")
+arraylist_dst.append("gd")
+arraylist_dst.append("nso")
+arraylist_dst.append("sr")
+arraylist_dst.append("st")
+arraylist_dst.append("sn")
+arraylist_dst.append("sd")
+arraylist_dst.append("si")
+arraylist_dst.append("sk")
+arraylist_dst.append("sl")
+arraylist_dst.append("so")
+arraylist_dst.append("es")
+arraylist_dst.append("su")
+arraylist_dst.append("sw")
+arraylist_dst.append("sv")
+arraylist_dst.append("tg")
+arraylist_dst.append("ta")
+arraylist_dst.append("tt")
+arraylist_dst.append("te")
+arraylist_dst.append("th")
+arraylist_dst.append("ti")
+arraylist_dst.append("ts")
+arraylist_dst.append("tr")
+arraylist_dst.append("tk")
+arraylist_dst.append("tw")
+arraylist_dst.append("uk")
+arraylist_dst.append("ur")
+arraylist_dst.append("ug")
+arraylist_dst.append("uz")
+arraylist_dst.append("vi")
+arraylist_dst.append("cy")
+arraylist_dst.append("xh")
+arraylist_dst.append("yi")
+arraylist_dst.append("yo")
+arraylist_dst.append("zu")
 
 arraylist_dst_languages = []
 arraylist_dst_languages.append("Afrikaans");
@@ -239,20 +239,20 @@ arraylist_dst_languages.append("Azerbaijani");
 arraylist_dst_languages.append("Bambara");
 arraylist_dst_languages.append("Basque");
 arraylist_dst_languages.append("Belarusian");
-arraylist_dst_languages.append("Bengali (Bangla)");
+arraylist_dst_languages.append("Bengali");
 arraylist_dst_languages.append("Bhojpuri");
 arraylist_dst_languages.append("Bosnian");
 arraylist_dst_languages.append("Bulgarian");
 arraylist_dst_languages.append("Catalan");
 arraylist_dst_languages.append("Cebuano");
-arraylist_dst_languages.append("Chichewa, Nyanja");
+arraylist_dst_languages.append("Chichewa");
 arraylist_dst_languages.append("Chinese (Simplified)");
 arraylist_dst_languages.append("Chinese (Traditional)");
 arraylist_dst_languages.append("Corsican");
 arraylist_dst_languages.append("Croatian");
 arraylist_dst_languages.append("Czech");
 arraylist_dst_languages.append("Danish");
-arraylist_dst_languages.append("Divehi, Maldivian");
+arraylist_dst_languages.append("Dhivehi");
 arraylist_dst_languages.append("Dogri");
 arraylist_dst_languages.append("Dutch");
 arraylist_dst_languages.append("English");
@@ -287,7 +287,7 @@ arraylist_dst_languages.append("Javanese");
 arraylist_dst_languages.append("Kannada");
 arraylist_dst_languages.append("Kazakh");
 arraylist_dst_languages.append("Khmer");
-arraylist_dst_languages.append("Kinyarwanda (Rwanda)");
+arraylist_dst_languages.append("Kinyarwanda");
 arraylist_dst_languages.append("Konkani");
 arraylist_dst_languages.append("Korean");
 arraylist_dst_languages.append("Krio");
@@ -296,10 +296,10 @@ arraylist_dst_languages.append("Kurdish (Sorani)");
 arraylist_dst_languages.append("Kyrgyz");
 arraylist_dst_languages.append("Lao");
 arraylist_dst_languages.append("Latin");
-arraylist_dst_languages.append("Latvian (Lettish)");
+arraylist_dst_languages.append("Latvian");
 arraylist_dst_languages.append("Lingala");
 arraylist_dst_languages.append("Lithuanian");
-arraylist_dst_languages.append("Luganda, Ganda");
+arraylist_dst_languages.append("Luganda");
 arraylist_dst_languages.append("Luxembourgish");
 arraylist_dst_languages.append("Macedonian");
 arraylist_dst_languages.append("Malagasy");
@@ -314,15 +314,15 @@ arraylist_dst_languages.append("Mongolian");
 arraylist_dst_languages.append("Myanmar (Burmese)");
 arraylist_dst_languages.append("Nepali");
 arraylist_dst_languages.append("Norwegian");
-arraylist_dst_languages.append("Oriya");
-arraylist_dst_languages.append("Oromo (Afaan Oromo)");
-arraylist_dst_languages.append("Pashto, Pushto");
-arraylist_dst_languages.append("Persian (Farsi)");
+arraylist_dst_languages.append("Odiya (Oriya)");
+arraylist_dst_languages.append("Oromo");
+arraylist_dst_languages.append("Pashto");
+arraylist_dst_languages.append("Persian");
 arraylist_dst_languages.append("Polish");
 arraylist_dst_languages.append("Portuguese");
-arraylist_dst_languages.append("Punjabi (Eastern)");
+arraylist_dst_languages.append("Punjabi");
 arraylist_dst_languages.append("Quechua");
-arraylist_dst_languages.append("Romanian, Moldavian");
+arraylist_dst_languages.append("Romanian");
 arraylist_dst_languages.append("Russian");
 arraylist_dst_languages.append("Samoan");
 arraylist_dst_languages.append("Sanskrit");
@@ -332,13 +332,13 @@ arraylist_dst_languages.append("Serbian");
 arraylist_dst_languages.append("Sesotho");
 arraylist_dst_languages.append("Shona");
 arraylist_dst_languages.append("Sindhi");
-arraylist_dst_languages.append("Sinhalese");
+arraylist_dst_languages.append("Sinhala");
 arraylist_dst_languages.append("Slovak");
 arraylist_dst_languages.append("Slovenian");
 arraylist_dst_languages.append("Somali");
 arraylist_dst_languages.append("Spanish");
 arraylist_dst_languages.append("Sundanese");
-arraylist_dst_languages.append("Swahili (Kiswahili)");
+arraylist_dst_languages.append("Swahili");
 arraylist_dst_languages.append("Swedish");
 arraylist_dst_languages.append("Tajik");
 arraylist_dst_languages.append("Tamil");
@@ -349,7 +349,7 @@ arraylist_dst_languages.append("Tigrinya");
 arraylist_dst_languages.append("Tsonga");
 arraylist_dst_languages.append("Turkish");
 arraylist_dst_languages.append("Turkmen");
-arraylist_dst_languages.append("Twi");
+arraylist_dst_languages.append("Twi (Akan)");
 arraylist_dst_languages.append("Ukrainian");
 arraylist_dst_languages.append("Urdu");
 arraylist_dst_languages.append("Uyghur");
@@ -664,7 +664,7 @@ def main():
     parser.add_argument("-f", "--filename", type=str, metavar="FILENAME", help="audio file to store recording to")
     parser.add_argument("-d", "--device", type=int_or_str, help="input device (numeric ID or substring)")
     parser.add_argument("-r", "--samplerate", type=int, help="sampling rate in Hertz for example 8000, 16000, 44100, or 48000")
-    parser.add_argument('-v', '--version', action='version', version='0.0.6')
+    parser.add_argument('-v', '--version', action='version', version='0.0.8')
     args = parser.parse_args(remaining)
     args = parser.parse_args()
 
