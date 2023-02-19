@@ -5,8 +5,8 @@ from threading import Timer
 import argparse
 import sounddevice as sd
 from vosk import Model, KaldiRecognizer
+import httpx
 import json
-from googletrans import Translator
 import PySimpleGUI as sg
 try:
     import queue  # Python 3 import
@@ -661,7 +661,7 @@ def main():
     parser.add_argument("-f", "--filename", type=str, metavar="FILENAME", help="audio file to store recording to")
     parser.add_argument("-d", "--device", type=int_or_str, help="input device (numeric ID or substring)")
     parser.add_argument("-r", "--samplerate", type=int, help="sampling rate in Hertz for example 8000, 16000, 44100, or 48000")
-    parser.add_argument('-v', '--version', action='version', version='0.0.10')
+    parser.add_argument('-v', '--version', action='version', version='0.0.11')
     args = parser.parse_args(remaining)
     args = parser.parse_args()
 
