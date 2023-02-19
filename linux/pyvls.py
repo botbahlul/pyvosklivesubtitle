@@ -5,7 +5,8 @@ from threading import Timer
 import argparse
 import sounddevice as sd
 import json
-from pygoogletranslation import Translator
+import httpx
+import json
 import PySimpleGUI as sg
 try:
     import queue  # Python 3 import
@@ -35,6 +36,7 @@ MODEL_PRE_URL = 'https://alphacephei.com/vosk/models/'
 MODEL_LIST_URL = MODEL_PRE_URL + 'model-list.json'
 MODEL_DIRS = [os.getenv('VOSK_MODEL_PATH'), Path('/usr/share/vosk'), Path.home() / 'AppData/Local/vosk', Path.home() / '.cache/vosk']
 
+
 def open_dll():
     dlldir = os.path.abspath(os.path.dirname("."))
     if sys.platform == 'win32':
@@ -50,18 +52,22 @@ def open_dll():
     else:
         raise TypeError("Unsupported platform")
 
+
 _c = open_dll()
+
 
 def list_models():
     response = requests.get(MODEL_LIST_URL)
     for model in response.json():
         print(model['name']) 
 
+
 def list_languages():
     response = requests.get(MODEL_LIST_URL)
     languages = set([m['lang'] for m in response.json()])
     for lang in languages:
         print (lang)
+
 
 class Model(object):
     def __init__(self, model_path=None, model_name=None, lang=None):
@@ -141,19 +147,18 @@ class Model(object):
             return displayed
         return update_to
 
-class SpkModel(object):
 
+class SpkModel(object):
     def __init__(self, model_path):
         self._handle = _c.vosk_spk_model_new(model_path.encode('utf-8'))
-
         if self._handle == _ffi.NULL:
             raise Exception("Failed to create a speaker model")
 
     def __del__(self):
         _c.vosk_spk_model_free(self._handle)
 
-class KaldiRecognizer(object):
 
+class KaldiRecognizer(object):
     def __init__(self, *args):
         if len(args) == 2:
             self._handle = _c.vosk_recognizer_new(args[0]._handle, args[1])
@@ -215,8 +220,8 @@ def GpuInit():
 def GpuThreadInit():
     _c.vosk_gpu_thread_init()
 
-class BatchModel(object):
 
+class BatchModel(object):
     def __init__(self, *args):
         self._handle = _c.vosk_batch_model_new()
 
@@ -229,8 +234,8 @@ class BatchModel(object):
     def Wait(self):
         _c.vosk_batch_model_wait(self._handle)
 
-class BatchRecognizer(object):
 
+class BatchRecognizer(object):
     def __init__(self, *args):
         self._handle = _c.vosk_batch_recognizer_new(args[0]._handle, args[1])
 
@@ -646,7 +651,6 @@ def listen_worker_thread(src, dst):
         model = Model(lang = src)
 
         with sd.RawInputStream(samplerate=SampleRate, blocksize = 8000, device=Device, dtype="int16", channels=1, callback=callback):
-
             rec = KaldiRecognizer(model, SampleRate)
 
             while recognizing==True:
@@ -672,17 +676,30 @@ def listen_worker_thread(src, dst):
         recognizing==False
         rec = None
         data = None
-        #print("\nDone")
         parser.exit(0)
 
     except Exception as e:
         parser.exit(type(e).__name__ + ": " + str(e))
 
 
-def translate(phrase, src, dest):
-    translator = Translator()
-    translated_phrase = translator.translate(phrase, src=src, dest=dest).text
-    return translated_phrase
+def GoogleTranslate(text, src, dst):
+    url = 'https://translate.googleapis.com/translate_a/'
+    params = 'single?client=gtx&sl='+src+'&tl='+dst+'&dt=t&q='+text;
+    with httpx.Client(http2=True) as client:
+        client.headers.update({'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)', 'Referer': 'https://translate.google.com',})
+        response = client.get(url+params)
+        #print('response.status_code = {}'.format(response.status_code))
+        if response.status_code == 200:
+            response_json = response.json()[0]
+            #print('response_json = {}'.format(response_json))
+            length = len(response_json)
+            #print('length = {}'.format(length))
+            translation = ""
+            for i in range(length):
+                #print("{} {}".format(i, response_json[i][0]))
+                translation = translation + response_json[i][0]
+            return translation
+        return
 
 
 def timed_translate(src, dst):
@@ -691,7 +708,8 @@ def timed_translate(src, dst):
     WAIT_SECONDS=0.2
     phrase = str(main_window['-ML1-'].get())
     if (len(phrase)>0):
-        translated_text = translate(phrase, src, dst)
+        #translated_text = translate(phrase, src, dst)
+        translated_text = GoogleTranslate(phrase, src, dst)
         main_window.write_event_value('-VOICE-TRANSLATED-', translated_text)
     threading.Timer(WAIT_SECONDS, timed_translate, args=(src, dst)).start()
 
@@ -892,7 +910,7 @@ def main():
     parser.add_argument("-f", "--filename", type=str, metavar="FILENAME", help="audio file to store recording to")
     parser.add_argument("-d", "--device", type=int_or_str, help="input device (numeric ID or substring)")
     parser.add_argument("-r", "--samplerate", type=int, help="sampling rate in Hertz for example 8000, 16000, 44100, or 48000")
-    parser.add_argument('-v', '--version', action='version', version='0.0.8')
+    parser.add_argument('-v', '--version', action='version', version='0.0.9')
     args = parser.parse_args(remaining)
     args = parser.parse_args()
 
@@ -924,6 +942,9 @@ def main():
 
     if args.filename:
         Filename = args.filename
+        dump_fn = open(args.filename, "wb")
+    else:
+        dump_fn = None
 
 
 #-----------------------------------------------------------GUI STARTS-----------------------------------------------------------#
