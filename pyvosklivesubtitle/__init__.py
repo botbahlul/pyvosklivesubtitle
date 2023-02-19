@@ -4,14 +4,263 @@ import threading
 from threading import Timer
 import argparse
 import sounddevice as sd
-from vosk import Model, KaldiRecognizer
 import json
-from pygoogletranslation import Translator
+import httpx
+import json
 import PySimpleGUI as sg
 try:
     import queue  # Python 3 import
 except ImportError:
     import Queue  # Python 2 import
+
+#---------------------------------------------------------VOSK PART---------------------------------------------------------------------#
+
+import requests
+from urllib.request import urlretrieve
+from zipfile import ZipFile
+from re import match
+from pathlib import Path
+from tqdm import tqdm
+import _cffi_backend
+
+_ffi = _cffi_backend.FFI('vosk.vosk_cffi',
+    _version = 0x2601,
+    _types = b'\x00\x00\x03\x0D\x00\x00\x00\x0F\x00\x00\x1B\x0D\x00\x00\x5B\x03\x00\x00\x0D\x01\x00\x00\x00\x0F\x00\x00\x0A\x0D\x00\x00\x60\x03\x00\x00\x00\x0F\x00\x00\x1E\x0D\x00\x00\x5D\x03\x00\x00\x0D\x01\x00\x00\x00\x0F\x00\x00\x1E\x0D\x00\x00\x0A\x11\x00\x00\x0D\x01\x00\x00\x5F\x03\x00\x00\x00\x0F\x00\x00\x1E\x0D\x00\x00\x0A\x11\x00\x00\x0D\x01\x00\x00\x07\x11\x00\x00\x00\x0F\x00\x00\x10\x0D\x00\x00\x07\x11\x00\x00\x00\x0F\x00\x00\x07\x0D\x00\x00\x5C\x03\x00\x00\x00\x0F\x00\x00\x07\x0D\x00\x00\x5E\x03\x00\x00\x00\x0F\x00\x00\x2A\x0D\x00\x00\x1B\x11\x00\x00\x00\x0F\x00\x00\x2A\x0D\x00\x00\x0A\x11\x00\x00\x07\x11\x00\x00\x00\x0F\x00\x00\x2A\x0D\x00\x00\x1E\x11\x00\x00\x07\x11\x00\x00\x07\x01\x00\x00\x00\x0F\x00\x00\x2A\x0D\x00\x00\x1E\x11\x00\x00\x04\x03\x00\x00\x07\x01\x00\x00\x00\x0F\x00\x00\x2A\x0D\x00\x00\x1E\x11\x00\x00\x61\x03\x00\x00\x07\x01\x00\x00\x00\x0F\x00\x00\x62\x0D\x00\x00\x03\x11\x00\x00\x00\x0F\x00\x00\x62\x0D\x00\x00\x1B\x11\x00\x00\x00\x0F\x00\x00\x62\x0D\x00\x00\x1B\x11\x00\x00\x07\x11\x00\x00\x07\x01\x00\x00\x00\x0F\x00\x00\x62\x0D\x00\x00\x1B\x11\x00\x00\x07\x01\x00\x00\x00\x0F\x00\x00\x62\x0D\x00\x00\x0A\x11\x00\x00\x00\x0F\x00\x00\x62\x0D\x00\x00\x1E\x11\x00\x00\x00\x0F\x00\x00\x62\x0D\x00\x00\x1E\x11\x00\x00\x10\x11\x00\x00\x00\x0F\x00\x00\x62\x0D\x00\x00\x1E\x11\x00\x00\x07\x01\x00\x00\x00\x0F\x00\x00\x62\x0D\x00\x00\x10\x11\x00\x00\x00\x0F\x00\x00\x62\x0D\x00\x00\x07\x01\x00\x00\x00\x0F\x00\x00\x62\x0D\x00\x00\x00\x0F\x00\x00\x00\x09\x00\x00\x01\x09\x00\x00\x02\x09\x00\x00\x03\x09\x00\x00\x04\x09\x00\x00\x02\x01\x00\x00\x05\x01\x00\x00\x00\x01',
+    _globals = (b'\x00\x00\x36\x23vosk_batch_model_free',0,b'\x00\x00\x00\x23vosk_batch_model_new',0,b'\x00\x00\x36\x23vosk_batch_model_wait',0,b'\x00\x00\x3C\x23vosk_batch_recognizer_accept_waveform',0,b'\x00\x00\x39\x23vosk_batch_recognizer_finish_stream',0,b'\x00\x00\x39\x23vosk_batch_recognizer_free',0,b'\x00\x00\x1A\x23vosk_batch_recognizer_front_result',0,b'\x00\x00\x20\x23vosk_batch_recognizer_get_pending_chunks',0,b'\x00\x00\x02\x23vosk_batch_recognizer_new',0,b'\x00\x00\x39\x23vosk_batch_recognizer_pop',0,b'\x00\x00\x41\x23vosk_batch_recognizer_set_nlsml',0,b'\x00\x00\x59\x23vosk_gpu_init',0,b'\x00\x00\x59\x23vosk_gpu_thread_init',0,b'\x00\x00\x23\x23vosk_model_find_word',0,b'\x00\x00\x45\x23vosk_model_free',0,b'\x00\x00\x06\x23vosk_model_new',0,b'\x00\x00\x27\x23vosk_recognizer_accept_waveform',0,b'\x00\x00\x2C\x23vosk_recognizer_accept_waveform_f',0,b'\x00\x00\x31\x23vosk_recognizer_accept_waveform_s',0,b'\x00\x00\x1D\x23vosk_recognizer_final_result',0,b'\x00\x00\x48\x23vosk_recognizer_free',0,b'\x00\x00\x09\x23vosk_recognizer_new',0,b'\x00\x00\x12\x23vosk_recognizer_new_grm',0,b'\x00\x00\x0D\x23vosk_recognizer_new_spk',0,b'\x00\x00\x1D\x23vosk_recognizer_partial_result',0,b'\x00\x00\x48\x23vosk_recognizer_reset',0,b'\x00\x00\x1D\x23vosk_recognizer_result',0,b'\x00\x00\x4F\x23vosk_recognizer_set_max_alternatives',0,b'\x00\x00\x4F\x23vosk_recognizer_set_nlsml',0,b'\x00\x00\x4F\x23vosk_recognizer_set_partial_words',0,b'\x00\x00\x4B\x23vosk_recognizer_set_spk_model',0,b'\x00\x00\x4F\x23vosk_recognizer_set_words',0,b'\x00\x00\x56\x23vosk_set_log_level',0,b'\x00\x00\x53\x23vosk_spk_model_free',0,b'\x00\x00\x17\x23vosk_spk_model_new',0),
+    _struct_unions = ((b'\x00\x00\x00\x5B\x00\x00\x00\x10VoskBatchModel',),(b'\x00\x00\x00\x5C\x00\x00\x00\x10VoskBatchRecognizer',),(b'\x00\x00\x00\x5D\x00\x00\x00\x10VoskModel',),(b'\x00\x00\x00\x5E\x00\x00\x00\x10VoskRecognizer',),(b'\x00\x00\x00\x5F\x00\x00\x00\x10VoskSpkModel',)),
+    _typenames = (b'\x00\x00\x00\x5BVoskBatchModel',b'\x00\x00\x00\x5CVoskBatchRecognizer',b'\x00\x00\x00\x5DVoskModel',b'\x00\x00\x00\x5EVoskRecognizer',b'\x00\x00\x00\x5FVoskSpkModel'),
+)
+
+# Remote location of the models and local folders
+MODEL_PRE_URL = 'https://alphacephei.com/vosk/models/'
+MODEL_LIST_URL = MODEL_PRE_URL + 'model-list.json'
+MODEL_DIRS = [os.getenv('VOSK_MODEL_PATH'), Path('/usr/share/vosk'), Path.home() / 'AppData/Local/vosk', Path.home() / '.cache/vosk']
+
+
+def open_dll():
+    dlldir = os.path.abspath(os.path.dirname("."))
+    if sys.platform == 'win32':
+        # We want to load dependencies too
+        os.environ["PATH"] = dlldir + os.pathsep + os.environ['PATH']
+        if hasattr(os, 'add_dll_directory'):
+            os.add_dll_directory(dlldir)
+        return _ffi.dlopen(os.path.join(dlldir, "libvosk.dll"))
+    elif sys.platform == 'linux':
+        return _ffi.dlopen(os.path.join(dlldir, "libvosk.so"))
+    elif sys.platform == 'darwin':
+        return _ffi.dlopen(os.path.join(dlldir, "libvosk.dyld"))
+    else:
+        raise TypeError("Unsupported platform")
+
+
+_c = open_dll()
+
+
+def list_models():
+    response = requests.get(MODEL_LIST_URL)
+    for model in response.json():
+        print(model['name']) 
+
+
+def list_languages():
+    response = requests.get(MODEL_LIST_URL)
+    languages = set([m['lang'] for m in response.json()])
+    for lang in languages:
+        print (lang)
+
+
+class Model(object):
+    def __init__(self, model_path=None, model_name=None, lang=None):
+        if model_path != None:
+            self._handle = _c.vosk_model_new(model_path.encode('utf-8'))
+        else:
+            model_path = self.get_model_path(model_name, lang)
+            self._handle = _c.vosk_model_new(model_path.encode('utf-8'))
+        if self._handle == _ffi.NULL:
+            raise Exception("Failed to create a model")
+
+    def __del__(self):
+        _c.vosk_model_free(self._handle)
+
+    def vosk_model_find_word(self, word):
+        return _c.vosk_model_find_word(self._handle, word.encode('utf-8'))
+
+    def get_model_path(self, model_name, lang):
+        if model_name is None:
+            model_path = self.get_model_by_lang(lang)
+        else:
+            model_path = self.get_model_by_name(model_name)
+        return str(model_path)
+
+    def get_model_by_name(self, model_name):
+        for directory in MODEL_DIRS:
+            if directory is None or not Path(directory).exists():
+                continue
+            model_file_list = os.listdir(directory)
+            model_file = [model for model in model_file_list if model == model_name]
+            if model_file != []:
+                return Path(directory, model_file[0])
+        response = requests.get(MODEL_LIST_URL)
+        result_model = [model['name'] for model in response.json() if model['name'] == model_name]
+        if result_model == []:
+            raise Exception("model name %s does not exist" % (model_name))
+        else:
+            self.download_model(Path(directory, result_model[0]))
+            return Path(directory, result_model[0])
+
+    def get_model_by_lang(self, lang):
+        for directory in MODEL_DIRS:
+            if directory is None or not Path(directory).exists():
+                continue
+            model_file_list = os.listdir(directory)
+            model_file = [model for model in model_file_list if match(f"vosk-model(-small)?-{lang}", model)]
+            if model_file != []:
+                return Path(directory, model_file[0])
+        response = requests.get(MODEL_LIST_URL)
+        result_model = [model['name'] for model in response.json() if model['lang'] == lang and model['type'] == 'small' and model['obsolete'] == 'false']
+        if result_model == []:
+            raise Exception("lang %s does not exist" % (lang))
+        else:
+            self.download_model(Path(directory, result_model[0]))
+            return Path(directory, result_model[0])
+
+    def download_model(self, model_name):
+        if not MODEL_DIRS[3].exists():
+            MODEL_DIRS[3].mkdir()
+        with tqdm(unit='B', unit_scale=True, unit_divisor=1024, miniters=1,
+                desc=(MODEL_PRE_URL + str(model_name.name) + '.zip').split('/')[-1]) as t:
+            reporthook = self.download_progress_hook(t)
+            urlretrieve(MODEL_PRE_URL + str(model_name.name) + '.zip', str(model_name) + '.zip', 
+                reporthook=reporthook, data=None)
+            t.total = t.n
+            with ZipFile(str(model_name) + '.zip', 'r') as model_ref:
+                model_ref.extractall(model_name.parent)
+            Path(str(model_name) + '.zip').unlink()
+
+    def download_progress_hook(self, t):
+        last_b = [0]
+        def update_to(b=1, bsize=1, tsize=None):
+            if tsize not in (None, -1):
+                t.total = tsize
+            displayed = t.update((b - last_b[0]) * bsize)
+            last_b[0] = b
+            return displayed
+        return update_to
+
+
+class SpkModel(object):
+    def __init__(self, model_path):
+        self._handle = _c.vosk_spk_model_new(model_path.encode('utf-8'))
+        if self._handle == _ffi.NULL:
+            raise Exception("Failed to create a speaker model")
+
+    def __del__(self):
+        _c.vosk_spk_model_free(self._handle)
+
+
+class KaldiRecognizer(object):
+    def __init__(self, *args):
+        if len(args) == 2:
+            self._handle = _c.vosk_recognizer_new(args[0]._handle, args[1])
+        elif len(args) == 3 and type(args[2]) is SpkModel:
+            self._handle = _c.vosk_recognizer_new_spk(args[0]._handle, args[1], args[2]._handle)
+        elif len(args) == 3 and type(args[2]) is str:
+            self._handle = _c.vosk_recognizer_new_grm(args[0]._handle, args[1], args[2].encode('utf-8'))
+        else:
+            raise TypeError("Unknown arguments")
+
+        if self._handle == _ffi.NULL:
+            raise Exception("Failed to create a recognizer")
+
+    def __del__(self):
+        _c.vosk_recognizer_free(self._handle)
+
+    def SetMaxAlternatives(self, max_alternatives):
+        _c.vosk_recognizer_set_max_alternatives(self._handle, max_alternatives)
+
+    def SetWords(self, enable_words):
+        _c.vosk_recognizer_set_words(self._handle, 1 if enable_words else 0)
+
+    def SetPartialWords(self, enable_partial_words):
+        _c.vosk_recognizer_set_partial_words(self._handle, 1 if enable_partial_words else 0)
+
+    def SetNLSML(self, enable_nlsml):
+        _c.vosk_recognizer_set_nlsml(self._handle, 1 if enable_nlsml else 0)
+
+    def SetSpkModel(self, spk_model):
+        _c.vosk_recognizer_set_spk_model(self._handle, spk_model._handle)
+
+    def AcceptWaveform(self, data):
+        res = _c.vosk_recognizer_accept_waveform(self._handle, data, len(data))
+        if res < 0:
+            raise Exception("Failed to process waveform")
+        return res
+
+    def Result(self):
+        return _ffi.string(_c.vosk_recognizer_result(self._handle)).decode('utf-8')
+
+    def PartialResult(self):
+        return _ffi.string(_c.vosk_recognizer_partial_result(self._handle)).decode('utf-8')
+
+    def FinalResult(self):
+        return _ffi.string(_c.vosk_recognizer_final_result(self._handle)).decode('utf-8')
+
+    def Reset(self):
+        return _c.vosk_recognizer_reset(self._handle)
+
+
+def SetLogLevel(level):
+    return _c.vosk_set_log_level(level)
+
+
+def GpuInit():
+    _c.vosk_gpu_init()
+
+
+def GpuThreadInit():
+    _c.vosk_gpu_thread_init()
+
+
+class BatchModel(object):
+    def __init__(self, *args):
+        self._handle = _c.vosk_batch_model_new()
+
+        if self._handle == _ffi.NULL:
+            raise Exception("Failed to create a model")
+
+    def __del__(self):
+        _c.vosk_batch_model_free(self._handle)
+
+    def Wait(self):
+        _c.vosk_batch_model_wait(self._handle)
+
+
+class BatchRecognizer(object):
+    def __init__(self, *args):
+        self._handle = _c.vosk_batch_recognizer_new(args[0]._handle, args[1])
+
+        if self._handle == _ffi.NULL:
+            raise Exception("Failed to create a recognizer")
+
+    def __del__(self):
+        _c.vosk_batch_recognizer_free(self._handle)
+
+    def AcceptWaveform(self, data):
+        res = _c.vosk_batch_recognizer_accept_waveform(self._handle, data, len(data))
+
+    def Result(self):
+        ptr = _c.vosk_batch_recognizer_front_result(self._handle)
+        res = _ffi.string(ptr).decode('utf-8')
+        _c.vosk_batch_recognizer_pop(self._handle)
+        return res
+
+    def FinishStream(self):
+        _c.vosk_batch_recognizer_finish_stream(self._handle)
+
+    def GetPendingChunks(self):
+        return _c.vosk_batch_recognizer_get_pending_chunks(self._handle)
+
+#-------------------------------------------------------------------------------------------------------------------------------------#
 
 q = queue.Queue()
 
@@ -402,10 +651,6 @@ def listen_worker_thread(src, dst):
         model = Model(lang = src)
 
         with sd.RawInputStream(samplerate=SampleRate, blocksize = 8000, device=Device, dtype="int16", channels=1, callback=callback):
-            #print("#" * 80)
-            #print("Press Ctrl+C to stop the recording")
-            #print("#" * 80)
-
             rec = KaldiRecognizer(model, SampleRate)
 
             while recognizing==True:
@@ -419,9 +664,6 @@ def listen_worker_thread(src, dst):
                 partial_results_text = ''
                 if rec.AcceptWaveform(data):
                     text = ((((((rec.Result().replace("text", "")).replace("{", "")).replace("}", "")).replace(":", "")).replace("partial", "")).replace("\"", "")).lower().strip()
-                    #if len(text)>0:
-                        #translated_text = translate(text, src=src, dest=dst)
-                        #main_window.write_event_value('-VOICE-TRANSLATED-', translated_text)
                 else:
                     text = ((((((rec.PartialResult().replace("text", "")).replace("{", "")).replace("}", "")).replace(":", "")).replace("partial", "")).replace("\"", "")).lower().strip()
                     if len(text)>0:
@@ -434,28 +676,43 @@ def listen_worker_thread(src, dst):
         recognizing==False
         rec = None
         data = None
-        print("\nDone")
         parser.exit(0)
 
     except Exception as e:
         parser.exit(type(e).__name__ + ": " + str(e))
 
 
-def translate(phrase, src, dest):
-    translator = Translator()
-    translated_phrase = translator.translate(phrase, src=src, dest=dest).text
-    return translated_phrase
+def GoogleTranslate(text, src, dst):
+    url = 'https://translate.googleapis.com/translate_a/'
+    params = 'single?client=gtx&sl='+src+'&tl='+dst+'&dt=t&q='+text;
+    with httpx.Client(http2=True) as client:
+        client.headers.update({'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)', 'Referer': 'https://translate.google.com',})
+        response = client.get(url+params)
+        #print('response.status_code = {}'.format(response.status_code))
+        if response.status_code == 200:
+            response_json = response.json()[0]
+            #print('response_json = {}'.format(response_json))
+            length = len(response_json)
+            #print('length = {}'.format(length))
+            translation = ""
+            for i in range(length):
+                #print("{} {}".format(i, response_json[i][0]))
+                translation = translation + response_json[i][0]
+            return translation
+        return
 
 
 def timed_translate(src, dst):
     global main_window
 
-    WAIT_SECONDS=0.15
+    WAIT_SECONDS=0.2
     phrase = str(main_window['-ML1-'].get())
     if (len(phrase)>0):
-        translated_text = translate(phrase, src, dst)
+        #translated_text = translate(phrase, src, dst)
+        translated_text = GoogleTranslate(phrase, src, dst)
         main_window.write_event_value('-VOICE-TRANSLATED-', translated_text)
     threading.Timer(WAIT_SECONDS, timed_translate, args=(src, dst)).start()
+
 
 #-------------------------------------------------------------GUI FUNCTIONS-------------------------------------------------------------#
 
@@ -532,6 +789,8 @@ def make_overlay_voice_window(voice_text):
         overlay_voice_window = sg.Window('voice_text', layout, no_titlebar=True, keep_on_top=True, size=(wszx,wszy), location=(wx,wy), 
             margins=(0, 0), background_color='black', alpha_channel=0.7, return_keyboard_events=True, finalize=True)
 
+        #overlay_voice_window.set_alpha(0.6)
+
         overlay_translation_window.TKroot.attributes('-type', 'splash')
         overlay_translation_window.TKroot.attributes('-topmost', 1)
         #overlay_translation_window.TKroot.attributes('-topmost', 0)
@@ -542,19 +801,6 @@ def make_overlay_voice_window(voice_text):
         overlay_voice_window = sg.Window('voice_text', layout, no_titlebar=True, keep_on_top=True, size=(wszx,wszy), location=(wx,wy), 
             margins=(0, 0), background_color='white', transparent_color='white', grab_anywhere=True, return_keyboard_events=True, 
             finalize=True)
-
-    #layout = [[sg.Multiline(default_text=voice_text, size=(mlszx, mlszy), text_color='yellow1', border_width=0, 
-        #background_color='black', no_scrollbar=True, justification='c', expand_x=True, expand_y=True,  key='-ML-LS1-')]]
-
-    #overlay_voice_window = sg.Window('voice_text', layout, no_titlebar=True, keep_on_top=True, background_color='black', size=(wszx,wszy), location=(wx,wy), 
-        #margins=(0, 0), return_keyboard_events=True, finalize=True)
-
-    #overlay_voice_window.set_alpha(0.6)
-
-    if not (sys.platform == "win32"):
-        overlay_voice_window.TKroot.attributes('-type', 'splash')
-        overlay_voice_window.TKroot.attributes('-topmost', 1)
-        overlay_voice_window.TKroot.attributes('-topmost', 0)
 
     #TIMEOUT=50*len(voice_text)
     #TIMEOUT=500
@@ -664,7 +910,7 @@ def main():
     parser.add_argument("-f", "--filename", type=str, metavar="FILENAME", help="audio file to store recording to")
     parser.add_argument("-d", "--device", type=int_or_str, help="input device (numeric ID or substring)")
     parser.add_argument("-r", "--samplerate", type=int, help="sampling rate in Hertz for example 8000, 16000, 44100, or 48000")
-    parser.add_argument('-v', '--version', action='version', version='0.0.8')
+    parser.add_argument('-v', '--version', action='version', version='0.0.9')
     args = parser.parse_args(remaining)
     args = parser.parse_args()
 
@@ -696,6 +942,9 @@ def main():
 
     if args.filename:
         Filename = args.filename
+        dump_fn = open(args.filename, "wb")
+    else:
+        dump_fn = None
 
 
 #-----------------------------------------------------------GUI STARTS-----------------------------------------------------------#
