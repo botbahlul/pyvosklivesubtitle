@@ -37,11 +37,32 @@ MODEL_LIST_URL = MODEL_PRE_URL + 'model-list.json'
 MODEL_DIRS = [os.getenv('VOSK_MODEL_PATH'), Path('/usr/share/vosk'), Path.home() / 'AppData/Local/vosk', Path.home() / '.cache/vosk']
 
 
+def libvoskdir():
+    if sys.platform == 'win32':
+        libvosk = "libvosk.dll"
+    elif sys.platform == 'linux':
+        libvosk = "libvosk.so"
+    elif sys.platform == 'linux':
+        libvosk = "libvosk.dyld"
+    dlldir = os.path.abspath(os.path.dirname(__file__))
+    os.environ["PATH"] = dlldir + os.pathsep + os.environ['PATH']
+    #print('os.environ[\"PATH\"] = {}'.format(os.environ["PATH"]))
+    for path in os.environ["PATH"].split(os.pathsep):
+        path = path.strip('"')
+        #print('checking libvosk.dll in {}'.format(path))
+        if os.path.isfile(os.path.join(path, libvosk)):
+            #print('found : {}'.format(os.path.join(path, libvosk)))
+            return path
+    raise TypeError('libvosk not found')
+    
+
 def open_dll():
-    dlldir = os.path.abspath(os.path.dirname("."))
+    dlldir = libvoskdir()
     if sys.platform == 'win32':
         # We want to load dependencies too
         os.environ["PATH"] = dlldir + os.pathsep + os.environ['PATH']
+        #print('os.environ[\"PATH\"] = {}'.format(os.environ["PATH"]))
+        #print("__file__ = {}".format(__file__))
         if hasattr(os, 'add_dll_directory'):
             os.add_dll_directory(dlldir)
         return _ffi.dlopen(os.path.join(dlldir, "libvosk.dll"))
@@ -52,9 +73,7 @@ def open_dll():
     else:
         raise TypeError("Unsupported platform")
 
-
 _c = open_dll()
-
 
 def list_models():
     response = requests.get(MODEL_LIST_URL)
@@ -910,7 +929,7 @@ def main():
     parser.add_argument("-f", "--filename", type=str, metavar="FILENAME", help="audio file to store recording to")
     parser.add_argument("-d", "--device", type=int_or_str, help="input device (numeric ID or substring)")
     parser.add_argument("-r", "--samplerate", type=int, help="sampling rate in Hertz for example 8000, 16000, 44100, or 48000")
-    parser.add_argument('-v', '--version', action='version', version='0.0.9')
+    parser.add_argument('-v', '--version', action='version', version='0.0.12')
     args = parser.parse_args(remaining)
     args = parser.parse_args()
 
@@ -1070,3 +1089,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
