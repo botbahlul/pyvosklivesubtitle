@@ -1,6 +1,6 @@
 # pyvosklivesubtitle <a href="https://pypi.org/project/pyvosklivesubtitle/"><img src="https://img.shields.io/pypi/v/pyvosklivesubtitle.svg"></img></a>
 
-### PySimpleGUI based DESKTOP APP that can RECOGNIZE any live streaming in 21 languages that supported by VOSK then TRANSLATE (using unofficial online Google Translate API) and display it as LIVE CAPTION / LIVE SUBTITLE
+### PySimpleGUI based DESKTOP APP that can RECOGNIZE any live streaming in 21 languages that supported by VOSK then TRANSLATE (using MLKIT Translate API) and display it as LIVE CAPTION / LIVE SUBTITLE
 
 The speech recognition part is using vosk python module https://pypi.org/project/vosk/
 ```
