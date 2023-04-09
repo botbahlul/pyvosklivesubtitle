@@ -1,22 +1,35 @@
 import sys
 import os
+import time
 import threading
 from threading import Timer
 import argparse
 import sounddevice as sd
 import json
 import httpx
-import json
 import PySimpleGUI as sg
 try:
     import queue  # Python 3 import
 except ImportError:
     import Queue  # Python 2 import
 
+import tempfile
+from datetime import datetime, timedelta
+import subprocess
+import ctypes
+import platform
+from streamlink import Streamlink
+from streamlink.exceptions import NoPluginError
+import six
+import pysrt
+import shutil
+import re
+import select
+
+
 #---------------------------------------------------------VOSK PART---------------------------------------------------------------------#
 
 import requests
-from urllib.request import urlretrieve
 from zipfile import ZipFile
 from re import match
 from pathlib import Path
@@ -36,6 +49,10 @@ MODEL_PRE_URL = 'https://alphacephei.com/vosk/models/'
 MODEL_LIST_URL = MODEL_PRE_URL + 'model-list.json'
 MODEL_DIRS = [os.getenv('VOSK_MODEL_PATH'), Path('/usr/share/vosk'), Path.home() / 'AppData/Local/vosk', Path.home() / '.cache/vosk']
 
+last_selected_src = None
+src_file = None
+last_selected_dst = None
+dst_file = None
 
 def libvoskdir():
     if sys.platform == 'win32':
@@ -46,12 +63,9 @@ def libvoskdir():
         libvosk = "libvosk.dyld"
     dlldir = os.path.abspath(os.path.dirname(__file__))
     os.environ["PATH"] = dlldir + os.pathsep + os.environ['PATH']
-    #print('os.environ[\"PATH\"] = {}'.format(os.environ["PATH"]))
     for path in os.environ["PATH"].split(os.pathsep):
         path = path.strip('"')
-        #print('checking libvosk.dll in {}'.format(path))
         if os.path.isfile(os.path.join(path, libvosk)):
-            #print('found : {}'.format(os.path.join(path, libvosk)))
             return path
     raise TypeError('libvosk not found')
     
@@ -61,8 +75,6 @@ def open_dll():
     if sys.platform == 'win32':
         # We want to load dependencies too
         os.environ["PATH"] = dlldir + os.pathsep + os.environ['PATH']
-        #print('os.environ[\"PATH\"] = {}'.format(os.environ["PATH"]))
-        #print("__file__ = {}".format(__file__))
         if hasattr(os, 'add_dll_directory'):
             os.add_dll_directory(dlldir)
         return _ffi.dlopen(os.path.join(dlldir, "libvosk.dll"))
@@ -72,6 +84,7 @@ def open_dll():
         return _ffi.dlopen(os.path.join(dlldir, "libvosk.dyld"))
     else:
         raise TypeError("Unsupported platform")
+
 
 _c = open_dll()
 
@@ -285,7 +298,7 @@ q = queue.Queue()
 
 SampleRate = None
 Device = None
-Filename = None
+wav_file_name = None
 recognizing = False
 
 arraylist_models = []
@@ -632,11 +645,78 @@ arraylist_dst_languages.append("Zulu");
 map_dst_of_language = dict(zip(arraylist_dst_languages, arraylist_dst))
 map_language_of_dst = dict(zip(arraylist_dst, arraylist_dst_languages))
 
-listening_thread=None
+thread_record_streaming = None
+thread_recognize = None
+thread_timed_translate = None
 text=''
 
 
 #-------------------------------------------------------------MISC FUNCTIONS-------------------------------------------------------------#
+
+
+def srt_formatter(subtitles, padding_before=0, padding_after=0):
+    """
+    Serialize a list of subtitles according to the SRT format, with optional time padding.
+    """
+    sub_rip_file = pysrt.SubRipFile()
+    for i, ((start, end), text) in enumerate(subtitles, start=1):
+        item = pysrt.SubRipItem()
+        item.index = i
+        item.text = six.text_type(text)
+        item.start.seconds = max(0, start - padding_before)
+        item.end.seconds = end + padding_after
+        sub_rip_file.append(item)
+    return '\n'.join(six.text_type(item) for item in sub_rip_file)
+
+
+def vtt_formatter(subtitles, padding_before=0, padding_after=0):
+    """
+    Serialize a list of subtitles according to the VTT format, with optional time padding.
+    """
+    text = srt_formatter(subtitles, padding_before, padding_after)
+    text = 'WEBVTT\n\n' + text.replace(',', '.')
+    return text
+
+
+def json_formatter(subtitles):
+    """
+    Serialize a list of subtitles as a JSON blob.
+    """
+    subtitle_dicts = [
+        {
+            'start': start,
+            'end': end,
+            'content': text,
+        }
+        for ((start, end), text)
+        in subtitles
+    ]
+    return json.dumps(subtitle_dicts)
+
+
+def raw_formatter(subtitles):
+    """
+    Serialize a list of subtitles as a newline-delimited string.
+    """
+    return ' '.join(text for (_rng, text) in subtitles)
+
+
+FORMATTERS = {
+    'srt': srt_formatter,
+    'vtt': vtt_formatter,
+    'json': json_formatter,
+    'raw': raw_formatter,
+}
+
+
+def check_thread_status():
+    global thread_recognize
+    if thread_recognize != None:
+        if thread_recognize.is_alive():
+            main_window.TKroot.after(100, check_thread_status) # check again in 100 milliseconds
+    else:
+        pass
+
 
 def int_or_str(text):
     """Helper function for argument parsing."""
@@ -653,40 +733,137 @@ def callback(indata, frames, time, status):
     q.put(bytes(indata))
 
 
-def listen_worker_thread(src, dst):
-    global main_window, listening_thread, text, recognizing, Device, SampleRate, Filename
+def worker_recognize(src):
+    global main_window, recognizing, text, Device, SampleRate, wav_file_name, regions, transcripts, start_button_click_time, ffmpeg_start_run_time, get_tmp_recorded_streaming_filepath_time, loading_time, first_streaming_duration_recorded
+
+    p = 0
+    f = 0
+    l = 0
+
+    start_time = None
+    end_time = None
+    first_streaming_duration_recorded = None
+    absolute_start_time = None
+
+    time_value_filename = "time_value"
+    time_value_filepath = os.path.join(tempfile.gettempdir(), time_value_filename)
+    if os.path.isfile(time_value_filepath):
+        time_value_file = open(time_value_filepath, "r")
+        time_value_string = time_value_file.read()
+        first_streaming_duration_recorded = datetime.strptime(time_value_string, "%H:%M:%S.%f") - datetime(1900, 1, 1)
+        time_value_file.close()
 
     try:
         if SampleRate is None:
             #soundfile expects an int, sounddevice provides a float:
             device_info = sd.query_devices(Device, "input")
             SampleRate = int(device_info["default_samplerate"])
-        
-        if Filename:
-            dump_fn = open(Filename, "wb")
+
+        if wav_file_name:
+            dump_fn = open(wav_file_name, "wb")
         else:
             dump_fn = None
 
         model = Model(lang = src)
 
-        with sd.RawInputStream(samplerate=SampleRate, blocksize = 8000, device=Device, dtype="int16", channels=1, callback=callback):
+        with sd.RawInputStream(samplerate=SampleRate, blocksize=8000, device=Device, dtype="int16", channels=1, callback=callback):
             rec = KaldiRecognizer(model, SampleRate)
 
-            while recognizing==True:
-                if recognizing==False:
+            while recognizing:
+                if not recognizing:
                     rec = None
                     data = None
+                    result = None
+                    results_text = None
+                    partial_results_text = None
+                    print("BREAK")
                     break
 
                 data = q.get()
                 results_text = ''
                 partial_results_text = ''
+
                 if rec.AcceptWaveform(data):
-                    text = ((((((rec.Result().replace("text", "")).replace("{", "")).replace("}", "")).replace(":", "")).replace("partial", "")).replace("\"", "")).lower().strip()
+                    result = json.loads(rec.Result())
+                    if result["text"] and absolute_start_time:
+                        text = result["text"]
+                        if len(text) > 0:
+                            main_window.write_event_value('-EVENT-VOICE-RECOGNIZED-', text)
+                            transcripts.append(text)
+
+                            f += 1
+                            p = 0
+
+                            absolute_end_time = datetime.now()
+                            end_time = start_time + (absolute_end_time - absolute_start_time)
+                            regions.append((start_time.total_seconds(), end_time.total_seconds()))
+
+                            #start_time_str = "{:02d}:{:02d}:{:06.3f}".format(
+                            start_time_str = "{:02d}:{:02d}:{:02.0f}.{:03.0f}".format(
+                                start_time.seconds // 3600,  # hours
+                                (start_time.seconds // 60) % 60,  # minutes
+                                start_time.seconds % 60, # seconds
+                                start_time.microseconds / 1000000  # microseconds
+                            )
+
+                            #end_time_str = "{:02d}:{:02d}:{:06.3f}".format(
+                            end_time_str = "{:02d}:{:02d}:{:02.0f}.{:03.0f}".format(
+                                end_time.seconds // 3600,  # hours
+                                (end_time.seconds // 60) % 60,  # minutes
+                                end_time.seconds % 60, # seconds
+                                end_time.microseconds / 1000000  # microseconds
+                            )
+
+                            time_stamp_string = start_time_str + "-" + end_time_str
+
+                            src_tmp_txt_transcription_filename = "record.txt"
+                            src_tmp_txt_transcription_filepath = os.path.join(tempfile.gettempdir(), src_tmp_txt_transcription_filename)
+                            src_tmp_txt_transcription_file = open(src_tmp_txt_transcription_filepath, "a")
+                            src_tmp_txt_transcription_file.write(time_stamp_string + " " + text + "\n")
+                            src_tmp_txt_transcription_file.close()
+
                 else:
-                    text = ((((((rec.PartialResult().replace("text", "")).replace("{", "")).replace("}", "")).replace(":", "")).replace("partial", "")).replace("\"", "")).lower().strip()
-                    if len(text)>0:
-                        main_window.write_event_value('-VOICE-RECOGNIZED-', text)
+                    result = json.loads(rec.PartialResult())
+                    if result["partial"]:
+                        text = result["partial"]
+                        if len(text)>0:
+                            main_window.write_event_value('-EVENT-VOICE-RECOGNIZED-', text)
+
+                            if main_window['-URL-'].get() != (None or "") and main_window['-RECORD-STREAMING-'].get() == True:
+                                if ffmpeg_start_run_time and l == 0:
+
+                                    loading_time = datetime.now() - ffmpeg_start_run_time - (ffmpeg_start_run_time - get_tmp_recorded_streaming_filepath_time)
+                                    if first_streaming_duration_recorded:
+
+                                        # A ROUGH GUESS OF THE FIRST PARTIAL RESULT START TIME :)
+                                        start_time = first_streaming_duration_recorded + loading_time
+                                        #start_time = first_streaming_duration_recorded + timedelta(seconds=1)
+
+                                        # MAKE SURE THAT IT'S EXECUTED ONLY ONCE
+                                        l += 1
+
+                                else:
+                                    if p == 0:
+                                        absolute_start_time = datetime.now()
+
+                                        if end_time:
+                                            start_time = end_time
+                                        p += 1
+
+                            else:
+                                if l == 0:
+                                    now_datetime = datetime.now()
+                                    now_time = now_datetime.time()
+                                    microseconds = (now_time.hour * 3600 + now_time.minute * 60 + now_time.second) * 1000000 + now_time.microsecond
+                                    start_time = timedelta(microseconds=microseconds)
+                                    l += 1
+                                else:
+                                    if p == 0:
+                                        absolute_start_time = datetime.now()
+
+                                        if end_time:
+                                            start_time = end_time
+                                        p += 1
 
                 if dump_fn is not None:
                     dump_fn.write(data)
@@ -701,6 +878,32 @@ def listen_worker_thread(src, dst):
         parser.exit(type(e).__name__ + ": " + str(e))
 
 
+class TranscriptionTranslator(object):
+    def __init__(self, src, dst, patience=-1):
+        self.src = src
+        self.dst = dst
+        self.patience = patience
+
+    def __call__(self, sentence):
+        translated_sentence = []
+        # handle the special case: empty string.
+        if not sentence:
+            return None
+
+        translated_sentence = GoogleTranslate(sentence, src=self.src, dst=self.dst)
+
+        fail_to_translate = translated_sentence[-1] == '\n'
+        while fail_to_translate and patience:
+            translated_sentence = GoogleTranslate(translated_sentence, src=self.src, dst=self.dst).text
+            if translated_sentence[-1] == '\n':
+                if patience == -1:
+                    continue
+                patience -= 1
+            else:
+                fail_to_translate = False
+        return translated_sentence
+
+
 def GoogleTranslate(text, src, dst):
     url = 'https://translate.googleapis.com/translate_a/'
     params = 'single?client=gtx&sl='+src+'&tl='+dst+'&dt=t&q='+text;
@@ -711,29 +914,304 @@ def GoogleTranslate(text, src, dst):
         if response.status_code == 200:
             response_json = response.json()[0]
             #print('response_json = {}'.format(response_json))
-            length = len(response_json)
-            #print('length = {}'.format(length))
-            translation = ""
-            for i in range(length):
-                #print("{} {}".format(i, response_json[i][0]))
-                translation = translation + response_json[i][0]
-            return translation
+            if response_json!= None:
+                length = len(response_json)
+                #print('length = {}'.format(length))
+                translation = ""
+                for i in range(length):
+                    #print("{} {}".format(i, response_json[i][0]))
+                    translation = translation + response_json[i][0]
+                return translation
         return
 
 
-def timed_translate(src, dst):
+def worker_timed_translate(src, dst):
+    global main_window, recognizing
+
+    while (recognizing==True):
+        phrase = str(main_window['-ML1-'].get())
+        if len(phrase)>0:
+            translated_text = GoogleTranslate(phrase, src, dst)
+            main_window.write_event_value('-EVENT-VOICE-TRANSLATED-', translated_text)
+
+        if not recognizing:
+            break
+
+
+def is_streaming_url(url):
+
+    streamlink = Streamlink()
+
+    if is_valid_url(url):
+        #print("is_valid_url(url) = {}".format(is_valid_url(url)))
+        try:
+            os.environ['STREAMLINK_DIR'] = './streamlink/'
+            os.environ['STREAMLINK_PLUGINS'] = './streamlink/plugins/'
+            os.environ['STREAMLINK_PLUGIN_DIR'] = './streamlink/plugins/'
+
+            streams = streamlink.streams(url)
+            if streams:
+                #print("is_streams = {}".format(True))
+                return True
+            else:
+                #print("is_streams = {}".format(False))
+                return False
+
+        except OSError:
+            #print("is_streams = OSError")
+            return False
+        except ValueError:
+            #print("is_streams = ValueError")
+            return False
+        except KeyError:
+            #print("is_streams = KeyError")
+            return False
+        except RuntimeError:
+            #print("is_streams = RuntimeError")
+            return False
+        except NoPluginError:
+            #print("is_streams = NoPluginError")
+            return False
+        except NotImplementedError:
+            #print("is_streams = NotImplementedError")
+            return False
+        except Exception as e:
+            #print("is_streams = {}".format(e))
+            return False
+    else:
+        #print("is_valid_url(url) = {}".format(is_valid_url(url)))
+        return False
+
+
+def is_valid_url(url):
+    try:
+        response = httpx.head(url)
+        response.raise_for_status()
+        return True
+    except (httpx.HTTPError, ValueError):
+        return False
+
+
+def record_streaming_windows(hls_url, filename):
+    global ffmpeg_start_run_time, first_streaming_duration_recorded, recognizing
+
+    #ffmpeg_cmd = ['ffmpeg', '-y', '-i', hls_url,  '-movflags', '+frag_keyframe+separate_moof+omit_tfhd_offset+empty_moov', '-fflags', 'nobuffer', '-loglevel', 'error',  f'{filename}']
+    ffmpeg_cmd = ['ffmpeg', '-y', '-i', f'{hls_url}',  '-movflags', '+frag_keyframe+separate_moof+omit_tfhd_offset+empty_moov', '-fflags', 'nobuffer', f'{filename}']
+
+    ffmpeg_start_run_time = datetime.now()
+    #print("ffmpeg_start_run_time = {}".format(ffmpeg_start_run_time))
+
+    first_streaming_duration_recorded = None
+
+    i = 0
+
+    process = subprocess.Popen(ffmpeg_cmd, stderr=subprocess.PIPE, creationflags=subprocess.CREATE_NO_WINDOW)
+
+    msg = "RUNNING"
+    main_window.write_event_value('-EVENT-THREAD-RECORD-STREAMING-STATUS-', msg)
+
+    while recognizing:
+        if not recognizing:
+            break
+
+        #for line in iter(process.stderr.readline, b''):
+        for line in iter(process.stderr.readline, b''):
+            line = line.decode('utf-8').rstrip()
+
+            if 'time=' in line:
+
+                # Extract the time value from the progress information
+                time_str = line.split('time=')[1].split()[0]
+                #print("time_str = {}".format(time_str))
+
+                if i == 0:
+                    ffmpeg_start_write_time = datetime.now()
+                    #print("ffmpeg_start_write_time = {}".format(ffmpeg_start_write_time))
+
+                    first_streaming_duration_recorded = datetime.strptime(time_str, "%H:%M:%S.%f") - datetime(1900, 1, 1)
+                    #print("first_streaming_duration_recorded = {}".format(first_streaming_duration_recorded))
+
+                    # MAKE SURE THAT first_streaming_duration_recorded EXECUTED ONLY ONCE
+                    i += 1
+
+                    time_value_filename = "time_value"
+                    time_value_filepath = os.path.join(tempfile.gettempdir(), time_value_filename)
+                    time_value_file = open(time_value_filepath, "w")
+                    time_value_file.write(time_str)
+                    time_value_file.close()
+
+                streaming_duration_recorded = datetime.strptime(time_str, "%H:%M:%S.%f") - datetime(1900, 1, 1)
+                #print("streaming_duration_recorded = {}".format(streaming_duration_recorded))
+                main_window.write_event_value('-EVENT-STREAMING-DURATION-RECORDED-', streaming_duration_recorded)
+
+    process.wait()
+
+
+# subprocess.Popen(ffmpeg_cmd) THREAD BEHAVIOR IS DIFFERENT IN LINUX
+def record_streaming_linux(url, output_file):
+    global ffmpeg_start_run_time, first_streaming_duration_recorded
+
+    #ffmpeg_cmd = ['ffmpeg', '-y', '-i', url, '-c', 'copy', '-bsf:a', 'aac_adtstoasc', '-f', 'mp4', output_file]
+    ffmpeg_cmd = ['ffmpeg', '-y', '-i', f'{url}',  '-movflags', '+frag_keyframe+separate_moof+omit_tfhd_offset+empty_moov', '-fflags', 'nobuffer', f'{output_file}']
+
+    ffmpeg_start_run_time = datetime.now()
+    #first_streaming_duration_recorded = None
+
+    # Define a function to run the ffmpeg process in a separate thread
+    def run_ffmpeg():
+        i = 0
+        line = None
+
+        process = subprocess.Popen(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
+
+        msg = "RUNNING"
+        main_window.write_event_value('-EVENT-THREAD-RECORD-STREAMING-STATUS-', msg)
+
+        # Set up a timer to periodically check for new output
+        timeout = 1.0
+        timer = threading.Timer(timeout, lambda: None)
+        timer.start()
+
+        # Read output from ffmpeg process
+        while True:
+            # Check if the process has finished
+            if process.poll() is not None:
+                break
+
+            # Check if there is new output to read, special for linux
+            rlist, _, _ = select.select([process.stderr], [], [], timeout)
+            if not rlist:
+                continue
+
+            # Read the new output and print it
+            line = rlist[0].readline().strip()
+            #print(line)
+
+            # Search for the time information in the output and print it
+            time_str = re.search(r'time=(\d+:\d+:\d+\.\d+)', line)
+
+            if time_str:
+                time_value = time_str.group(1)
+                #print(f"Time: {time_value}")
+
+                if i == 0:
+                    ffmpeg_start_write_time = datetime.now()
+                    #print("ffmpeg_start_write_time = {}".format(ffmpeg_start_write_time))
+
+                    first_streaming_duration_recorded = datetime.strptime(str(time_value), "%H:%M:%S.%f") - datetime(1900, 1, 1)
+                    #print("first_streaming_duration_recorded = {}".format(first_streaming_duration_recorded))
+
+                    # MAKE SURE THAT first_streaming_duration_recorded EXECUTED ONLY ONCE
+                    i += 1
+
+                    time_value_filename = "time_value"
+                    time_value_filepath = os.path.join(tempfile.gettempdir(), time_value_filename)
+                    time_value_file = open(time_value_filepath, "w")
+                    time_value_file.write(str(time_value))
+                    time_value_file.close()
+
+                streaming_duration_recorded = datetime.strptime(str(time_value), "%H:%M:%S.%f") - datetime(1900, 1, 1)
+                #print("streaming_duration_recorded = {}".format(streaming_duration_recorded))
+                main_window.write_event_value('-EVENT-STREAMING-DURATION-RECORDED-', streaming_duration_recorded)
+
+            # Restart the timer to check for new output
+            timer.cancel()
+            timer = threading.Timer(timeout, lambda: None)
+            timer.start()
+
+        # Close the ffmpeg process and print the return code
+        process.stdout.close()
+        process.stderr.close()
+        #print(f"FFmpeg exited with return code {process.returncode}")
+
+    # Start the thread to run ffmpeg
+    thread = threading.Thread(target=run_ffmpeg)
+    thread.start()
+
+    # Return the thread object so that the caller can join it if needed
+    return thread
+
+
+def stop_thread(thread):
+    if thread and thread.is_alive():
+        if platform.system() == 'Windows':
+            # Use ctypes to call the TerminateThread() function from the Windows API
+            # This forcibly terminates the thread, which can be unsafe in some cases
+            kernel32 = ctypes.windll.kernel32
+            thread_handle = kernel32.OpenThread(1, False, thread.ident)
+            if thread_handle:
+                ret = kernel32.TerminateThread(thread_handle, 0)
+                if ret == 0:
+                    msg = thread.name + "TERMINATION ERROR!"
+                else:
+                    msg = thread.name + "TERMINATED"
+                    thread = None
+                #print(msg)
+        elif platform.system() == 'Linux':
+            libpthread = ctypes.CDLL('libpthread.so.0')
+            thread_id = thread.ident
+            if thread_id:
+                print('thread_id = {}'.format(thread_id))
+                ret = libpthread.pthread_cancel(thread_id)
+                if ret == 0:
+                    msg = thread.name + "TERMINATION ERROR!"
+                else:
+                    msg = thread.name + "TERMINATED"
+                    thread = None
+                #print(msg)
+
+
+def stop_record_streaming_linux():
     global main_window
 
-    WAIT_SECONDS=0.2
-    phrase = str(main_window['-ML1-'].get())
-    if (len(phrase)>0):
-        #translated_text = translate(phrase, src, dst)
-        translated_text = GoogleTranslate(phrase, src, dst)
-        main_window.write_event_value('-VOICE-TRANSLATED-', translated_text)
-    threading.Timer(WAIT_SECONDS, timed_translate, args=(src, dst)).start()
+    msg = "TERMINATED"
+    main_window.write_event_value('-EVENT-THREAD-RECORD-STREAMING-STATUS-', msg)
+
+    ffmpeg_pid = subprocess.check_output(['pgrep', '-f', 'ffmpeg']).strip()
+    if ffmpeg_pid:
+        subprocess.Popen(['kill', ffmpeg_pid])
+    else:
+        msg = 'FFMPEG HAS TERMINATED'
+        main_window.write_event_value('-EVENT-THREAD-RECORD-STREAMING-STATUS-', msg)
+
+
+def stop_record_streaming_windows():
+    global main_window, thread_record_streaming
+
+    if thread_record_streaming and thread_record_streaming.is_alive():
+        # Use ctypes to call the TerminateThread() function from the Windows API
+        # This forcibly terminates the thread, which can be unsafe in some cases
+        kernel32 = ctypes.windll.kernel32
+        thread_handle = kernel32.OpenThread(1, False, thread_record_streaming.ident)
+        ret = kernel32.TerminateThread(thread_handle, 0)
+        if ret == 0:
+            msg = "TERMINATION ERROR!"
+        else:
+            msg = "TERMINATED"
+            thread_record_streaming = None
+        main_window.write_event_value('-EVENT-THREAD-RECORD-STREAMING-STATUS-', msg)
+
+        tasklist_output = subprocess.check_output(['tasklist'], creationflags=subprocess.CREATE_NO_WINDOW).decode('utf-8')
+
+        ffmpeg_pid = None
+        for line in tasklist_output.split('\n'):
+            if 'ffmpeg' in line:
+                ffmpeg_pid = line.split()[1]
+                break
+        if ffmpeg_pid:
+            devnull = open(os.devnull, 'w')
+            subprocess.Popen(['taskkill', '/F', '/T', '/PID', ffmpeg_pid], stdout=devnull, stderr=devnull, creationflags=subprocess.CREATE_NO_WINDOW)
+        else:
+            msg = 'FFMPEG HAS TERMINATED'
+            main_window.write_event_value('-EVENT-THREAD-RECORD-STREAMING-STATUS-', msg)
+
+    else:
+        msg = "NOT RUNNING"
+        main_window.write_event_value('-EVENT-THREAD-RECORD-STREAMING-STATUS-', msg)
 
 
 #-------------------------------------------------------------GUI FUNCTIONS-------------------------------------------------------------#
+
 
 def handle_focus(event):
     if event.widget == window:
@@ -747,7 +1225,7 @@ def steal_focus():
     if overlay_translation_window:
         overlay_translation_window.close()
         overlay_translation_window=None
-    if(sys.platform == "win32"):
+    if(platform.system() == "Windows"):
         main_window.TKroot.attributes('-topmost', True)
         main_window.TKroot.attributes('-topmost', False)
         main_window.TKroot.deiconify()
@@ -766,141 +1244,97 @@ def font_length(Text, Font, Size) :
     return length
 
 
-def make_overlay_voice_window(voice_text):
-    xmax,ymax=sg.Window.get_screen_size()
-    columns, rows = os.get_terminal_size()
-
-    FONT_TYPE='Arial'
-    if xmax>1280: FONT_SIZE=14
-    if xmax<=1280: FONT_SIZE=16
-
-    if len(voice_text)<=96:
-        wszx=int(9.9*(xmax/1280)*len(voice_text) + 60)
-        #wszx=font_length(voice_text, FONT_TYPE, FONT_SIZE)
-    else:
-        wszx=int(960*xmax/1280)
-
-    nl=int((len(voice_text)/96)+1)
-    #print('nl =', nl)
-
-    if nl==1:
-        LINE_SIZE=32
-    else:
-        LINE_SIZE=28*ymax/720
-
-    wszy=int(nl*LINE_SIZE)
-
-    #mlszx=int(0.15*wszx)
-    #mlszy=int(0.018*wszy)
-
-    wx=int((xmax-wszx)/2)
-    wy=int(2*ymax/720)
-
+def make_progress_bar_window(total, info):
+    FONT_TYPE = "Helvetica"
+    FONT_SIZE = 9
     sg.set_options(font=(FONT_TYPE, FONT_SIZE))
 
-    mlszx=len(voice_text)
-    mlszy=nl
+    layout = [[sg.Text(info, key='-INFO-')],
+              [sg.ProgressBar(total, orientation='h', size=(30, 10), key='-PROGRESS-'), sg.Text(size=(5,1), key='-PERCENTAGE-')]]
 
-    if not (sys.platform == "win32"):
-        layout = [[sg.Multiline(default_text=translated_text, size=(mlszx, mlszy), text_color='yellow1', border_width=0,
-            background_color='black', no_scrollbar=True, justification='l', expand_x=True, expand_y=True,  key='-ML-LS1-')]]
+    window = sg.Window("Progress", layout, no_titlebar=False, finalize=True)
 
-        overlay_voice_window = sg.Window('voice_text', layout, no_titlebar=True, keep_on_top=True, size=(wszx,wszy), location=(wx,wy), 
-            margins=(0, 0), background_color='black', alpha_channel=0.7, return_keyboard_events=True, finalize=True)
-
-        #overlay_voice_window.set_alpha(0.6)
-
-        overlay_translation_window.TKroot.attributes('-type', 'splash')
-        overlay_translation_window.TKroot.attributes('-topmost', 1)
-        #overlay_translation_window.TKroot.attributes('-topmost', 0)
-    else:
-        layout = [[sg.Multiline(default_text=voice_text, size=(mlszx, mlszy), text_color='yellow1', border_width=0,
-            background_color='white', no_scrollbar=True, justification='l', expand_x=True, expand_y=True,  key='-ML-LS1-')]]
-
-        overlay_voice_window = sg.Window('voice_text', layout, no_titlebar=True, keep_on_top=True, size=(wszx,wszy), location=(wx,wy), 
-            margins=(0, 0), background_color='white', transparent_color='white', grab_anywhere=True, return_keyboard_events=True, 
-            finalize=True)
-
-    #TIMEOUT=50*len(voice_text)
-    #TIMEOUT=500
-
-    #event, values = overlay_voice_window.read(timeout=TIMEOUT, close=True)
-    event, values = overlay_voice_window.read(500)
-
-    return overlay_voice_window
+    return window
 
 
 def make_overlay_translation_window(translated_text):
-    xmax,ymax=sg.Window.get_screen_size()
-    columns, rows = os.get_terminal_size()
+    xmax, ymax = sg.Window.get_screen_size()
+    max_columns = None
+    max_lines = None
 
-    FONT_TYPE='Arial'
-    #if xmax>1280: FONT_SIZE=14
-    #if xmax<=1280: FONT_SIZE=16
-    FONT_SIZE=16
+    if platform.system() == 'Windows':
+        SM_CXSCREEN = 0
+        SM_CYSCREEN = 1
+        width = ctypes.windll.user32.GetSystemMetrics(SM_CXSCREEN)
+        height = ctypes.windll.user32.GetSystemMetrics(SM_CYSCREEN)
+
+        max_columns = int(width/8.5)
+        max_lines = int(height/18)
+
+    elif platform.system() == 'Linux':
+        output = subprocess.check_output(['xrandr'])
+        primary_line = [line for line in output.decode().splitlines() if ' connected primary' in line][0]
+        primary_size = primary_line.split()[3].replace("+"," ").split()[0]
+
+        max_columns, max_lines = int(primary_size.split('x')[0]) // 8, int(primary_size.split('x')[1]) // 18
+
+    columns = max_columns
+    rows = max_lines
+
+    FONT_TYPE = 'Arial'
+    FONT_SIZE = 16
 
     if len(translated_text)<=96:
-        wszx=int(9.9*(xmax/1280)*len(translated_text) + 60)
-        #wszx=font_length(translated_text, FONT_TYPE, FONT_SIZE)
+        window_width = int(9.9*(xmax/1280)*len(translated_text) + 60)
+        #window_width = font_length(translated_text, FONT_TYPE, FONT_SIZE)
     else:
-        wszx=int(960*xmax/1280)
+        window_width=int(960*xmax/1280)
 
-    #wszx=int(960*xmax/1280)
+    nl = int((len(translated_text)/96) + 1)
 
-    nl=int((len(translated_text)/96)+1)
-    #print('nl =', nl)
-
-    if nl==1:
-        LINE_SIZE=32
+    if nl == 1:
+        LINE_SIZE = 32
     else:
-        LINE_SIZE=28*ymax/720
-    #LINE_SIZE=28*ymax/720
+        LINE_SIZE = 28*ymax/720
 
-    wszy=int(nl*LINE_SIZE)
+    window_height = int(nl*LINE_SIZE)
 
-    #mlszx=int(0.15*wszx)
-    #mlszy=int(0.018*wszy)
+    window_x=int((xmax-window_width)/2)
 
-    wx=int((xmax-wszx)/2)
-
-    if nl==1:
-        wy=int(528*ymax/720)
+    if nl == 1:
+        window_y = int(528*ymax/720)
     else:
-        wy=int((528-(nl-1)*28)*ymax/720)
-    #wy=int((528-(nl-1)*28)*ymax/720)
+        window_y = int((528-(nl-1)*28)*ymax/720)
 
-    if xmax>1280: FONT_SIZE=16
-    if xmax<=1280: FONT_SIZE=16
+    if xmax > 1280: FONT_SIZE = 16
+    if xmax <= 1280: FONT_SIZE = 16
 
     sg.set_options(font=("Arial", FONT_SIZE))
 
-    mlszx=len(translated_text)
-    mlszy=nl
+    multiline_width = len(translated_text)
+    multiline_height = nl
 
     TRANSPARENT_BLACK='#add123'
 
-    if not (sys.platform == "win32"):
-        layout = [[sg.Multiline(default_text=translated_text, size=(mlszx, mlszy), text_color='yellow1', border_width=0,
+    if not (platform.system() == "Windows"):
+        layout = [[sg.Multiline(default_text=translated_text, size=(multiline_width, multiline_height), text_color='yellow1', border_width=0,
             background_color='black', no_scrollbar=True,
             justification='l', expand_x=True, expand_y=True,  key='-ML-LS2-')]]
 
-        overlay_translation_window = sg.Window('text', layout, no_titlebar=True, keep_on_top=True, size=(wszx,wszy), location=(wx,wy), 
+        overlay_translation_window = sg.Window('text', layout, no_titlebar=True, keep_on_top=True, size=(window_width,window_height), location=(window_x,window_y), 
             margins=(0, 0), background_color='black', alpha_channel=0.7, return_keyboard_events=True, finalize=True)
 
         overlay_translation_window.TKroot.attributes('-type', 'splash')
         overlay_translation_window.TKroot.attributes('-topmost', 1)
         #overlay_translation_window.TKroot.attributes('-topmost', 0)
     else:
-        layout = [[sg.Multiline(default_text=translated_text, size=(mlszx, mlszy), text_color='yellow1', border_width=0,
+        layout = [[sg.Multiline(default_text=translated_text, size=(multiline_width, multiline_height), text_color='yellow1', border_width=0,
             background_color='white', no_scrollbar=True,
             justification='l', expand_x=True, expand_y=True,  key='-ML-LS2-')]]
 
-        overlay_translation_window = sg.Window('Translation', layout, no_titlebar=True, keep_on_top=True, size=(wszx,wszy), location=(wx,wy), 
+        overlay_translation_window = sg.Window('Translation', layout, no_titlebar=True, keep_on_top=True, size=(window_width,window_height), location=(window_x,window_y), 
             margins=(0, 0), background_color='white', transparent_color='white', grab_anywhere=True, return_keyboard_events=True, 
             finalize=True)
-
-    #TIMEOUT=50*len(translated_text)
-    #TIMEOUT=5000
 
     #event, values = overlay_translation_window.read(timeout=TIMEOUT, close=True)
     event, values = overlay_translation_window.read(500)
@@ -908,50 +1342,206 @@ def make_overlay_translation_window(translated_text):
     return overlay_translation_window
 
 
-#-------------------------------------------------------------MAIN PROGRAM-------------------------------------------------------------#
+def move_center(window):
+    screen_width, screen_height = window.get_screen_dimensions()
+    win_width, win_height = window.size
+    x, y = (screen_width - win_width)//2, (screen_height - win_height)//2-30
+    window.move(x, y)
+
+
+#=============================================================MAIN PROGRAM=============================================================#
 
 def main():
-    global main_window, listening_thread, text, recognizing, Device, SampleRate, Filename
+    global main_window, thread_recognize, thread_timed_translate, thread_record_streaming, text, recognizing, \
+        Device, SampleRate, wav_file_name, tmp_recorded_streaming_filepath, regions, transcripts, \
+        start_button_click_time, ffmpeg_start_run_time, get_tmp_recorded_streaming_filepath_time, \
+        first_streaming_duration_recorded, is_valid_url_streaming, stop_event
 
-    #parser = argparse.ArgumentParser()
+#--------------------------------------------------------------GUI PARTS--------------------------------------------------------------#
+
+    xmax, ymax = sg.Window.get_screen_size()
+    main_window_width = int(0.5*xmax)
+    main_window_height = int(0.5*ymax)
+    multiline_width = int(0.15*main_window_width)
+    multiline_height = int(0.0125*main_window_height)
+    FONT_TYPE = "Helvetica"
+    FONT_SIZE = 9
+    sg.set_options(font=(FONT_TYPE, FONT_SIZE))
+
+    layout = [[sg.Frame('Hints',[
+                                [sg.Text('Click \"Start\" button to start listening and printing subtitles on screen.', expand_x=True, expand_y=True)],
+                                [sg.Text('Check the \"Record Streaming\" checkbox and paste the streaming URL into URL inputbox to record the streaming.', expand_x=True, expand_y=True)],
+                                [sg.Text('If you record the streaming, when you save transcriptions, all timestamps will be relative to the \"Start\" button clicked time.', expand_x=True, expand_y=True)],
+                                [sg.Text('If you don\'t record the streaming, all timestamps will be based on your system clock.', expand_x=True, expand_y=True)],
+                                [sg.Text('If you need accurate subtitles sync for the video, please use PyAutoSRT (https://github.com/botbahlul/PyAutoSRT) ', expand_x=True, expand_y=True, enable_events=True)],
+                                ], border_width=2, expand_x=True, expand_y=True)],
+              [sg.Text('URL'), sg.Input(size=(12, 1), expand_x=True, expand_y=True, key='-URL-'),
+               sg.Checkbox("Record Streaming", key='-RECORD-STREAMING-', enable_events=True)],
+              [sg.Text('', size=(3, 1)),
+               sg.Text('Thread status'),
+               sg.Text('NOT RUNNING', size=(24, 1), background_color='green1', text_color='black', expand_x=True, expand_y=True, key='-RECORD-STREAMING-STATUS-'),
+               sg.Text('Duration recorded', size=(16, 1)),
+               sg.Text('0:00:00.000000', size=(9, 1), background_color='green1', text_color='black', expand_x=True, expand_y=True, key='-STREAMING-DURATION-RECORDED-'),
+               sg.Text('', size=(14, 1), expand_x=True, expand_y=True)],
+              [sg.Text('', expand_x=True, expand_y=True),
+               sg.Button('SAVE RECORDED STREAMING', size=(31,1), expand_x=True, expand_y=True, key='-EVENT-SAVE-RECORDED-STREAMING-'),
+               sg.Text('', expand_x=True, expand_y=True)],
+              [sg.Text('Audio language', size=(12, 1), expand_x=True, expand_y=True),
+               sg.Combo(list(map_src_of_language), size=(int(0.2*multiline_width), 1), default_value="English", expand_x=True, expand_y=True, key='-SRC-')],
+              [sg.Multiline(size=(multiline_width, multiline_height), expand_x=True, expand_y=True, key='-ML1-')],
+              [sg.Text('', expand_x=True, expand_y=True),
+               sg.Button('SAVE TRANSCRIPTION', size=(31,1), expand_x=True, expand_y=True, key='-EVENT-SAVE-SRC-TRANSCRIPTION-'),
+               sg.Text('', expand_x=True, expand_y=True)],
+              [sg.Text('Translation language', size=(12, 1),expand_x=True, expand_y=True),
+               sg.Combo(list(map_dst_of_language), size=(int(0.2*multiline_width), 1), default_value="Indonesian", expand_x=True, expand_y=True, key='-DST-')],
+              [sg.Multiline(size=(multiline_width, multiline_height), expand_x=True, expand_y=True, key='-ML2-')],
+              [sg.Text('', expand_x=True, expand_y=True, key='-SPACES3-'),
+               sg.Button('SAVE TRANSLATED TRANSCRIPTION', size=(31,1), expand_x=True, expand_y=True, key='-EVENT-SAVE-DST-TRANSCRIPTION-'),
+               sg.Text('', expand_x=True, expand_y=True, key='-SPACES4-')],
+              [sg.Button('Start', expand_x=True, expand_y=True, button_color=('white', '#283b5b'), key='-START-BUTTON-'),
+               sg.Button('Exit', expand_x=True, expand_y=True)]]
+
+
+#----------------------------------------------------------NON GUI PARTS--------------------------------------------------------------#
+
+    # VOSK LogLevel
+    SetLogLevel(-1)
+
+    last_selected_src = None
+    last_selected_dst = None
+
+    src_filename = "src"
+    src_filepath = os.path.join(tempfile.gettempdir(), src_filename)
+    if os.path.isfile(src_filepath):
+        src_file = open(src_filepath, "r")
+        last_selected_src = src_file.read()
+
+    dst_filename = "dst"
+    dst_filepath = os.path.join(tempfile.gettempdir(), dst_filename)
+    if os.path.isfile(dst_filepath):
+        dst_file = open(dst_filepath, "r")
+        last_selected_dst = dst_file.read()
+
+    recognizing = False
+
+    tmp_recorded_streaming_filename = "record.mp4"
+    tmp_recorded_streaming_filepath = os.path.join(tempfile.gettempdir(), tmp_recorded_streaming_filename)
+    if os.path.isfile(tmp_recorded_streaming_filepath):
+        os.remove(tmp_recorded_streaming_filepath)
+
+    saved_recorded_streaming_filename = None
+
+    subtitle_file_types = [
+        ('SRT Files', '*.srt'),
+        ('VTT Files', '*.vtt'),
+        ('JSON Files', '*.json'),
+        ('RAW Files', '*.raw'),
+        ('Text Files', '*.txt'),
+        ('All Files', '*.*'),
+    ]
+
+    FORMATTERS = {
+        'srt': srt_formatter,
+        'vtt': vtt_formatter,
+        'json': json_formatter,
+        'raw': raw_formatter,
+    }
+
+    video_file_types = [
+        ('MP4 Files', '*.mp4'),
+    ]
+
+    src_tmp_txt_transcription_filename = "record.txt"
+    src_tmp_txt_transcription_filepath = os.path.join(tempfile.gettempdir(), src_tmp_txt_transcription_filename)
+    if os.path.isfile(src_tmp_txt_transcription_filepath):
+        os.remove(src_tmp_txt_transcription_filepath)
+
+    dst_tmp_txt_transcription_filename = "record.translated.txt"
+    dst_tmp_txt_transcription_filepath = os.path.join(tempfile.gettempdir(), dst_tmp_txt_transcription_filename)
+    if os.path.isfile(dst_tmp_txt_transcription_filepath):
+        os.remove(dst_tmp_txt_transcription_filepath)
+
+    tmp_src_subtitle_filepath = None
+    tmp_dst_subtitle_filepath = None
+
+    saved_src_subtitle_filename = None
+    saved_dst_subtitle_filename = None
+
+    ffmpeg_start_run_time = None
+
     parser = argparse.ArgumentParser(add_help=False)
 
-    parser.add_argument('-S', '--src-language', help="Spoken language", default="en")
-    parser.add_argument('-D', '--dst-language', help="Desired language for translation", default="id")
-    parser.add_argument('-ll', '--list-languages', help="List all available source/destination languages", action='store_true')
+    if last_selected_src:
+        parser.add_argument('-S', '--src-language', help="Spoken language", default=last_selected_src)
+    else:
+        parser.add_argument('-S', '--src-language', help="Spoken language", default="en")
+
+    if last_selected_dst:
+        parser.add_argument('-D', '--dst-language', help="Desired language for translation", default=last_selected_dst)
+    else:
+        parser.add_argument('-D', '--dst-language', help="Desired language for translation", default="id")
+
+    parser.add_argument('-lls', '--list-languages-src', help="List all available source languages", action='store_true')
+    parser.add_argument('-lld', '--list-languages-dst', help="List all available destination languages", action='store_true')
+
+    parser.add_argument('-sf', '--subtitle-filename', help="Subtitle file name for saved transcriptions")
+    parser.add_argument('-F', '--subtitle-format', help="Desired subtitle format for saved transcriptions (default is \"srt\")", default="srt")
+    parser.add_argument('-lsf', '--list-subtitle-formats', help="List all available subtitle formats", action='store_true')
 
     parser.add_argument("-ld", "--list-devices", action="store_true", help="show list of audio devices and exit")
+
     args, remaining = parser.parse_known_args()
+
     if args.list_devices:
         print(sd.query_devices())
         parser.exit(0)
+
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter, parents=[parser])
-    parser.add_argument("-f", "--filename", type=str, metavar="FILENAME", help="audio file to store recording to")
+
+    parser.add_argument("-af", "--audio-filename", type=str, metavar="AUDIO_FILENAME", help="audio file to store recording to")
     parser.add_argument("-d", "--device", type=int_or_str, help="input device (numeric ID or substring)")
     parser.add_argument("-r", "--samplerate", type=int, help="sampling rate in Hertz for example 8000, 16000, 44100, or 48000")
-    parser.add_argument('-v', '--version', action='version', version='0.0.12')
+    parser.add_argument('-v', '--version', action='version', version='0.1.0')
+
+    parser.add_argument("-u", "--url", type=str, metavar="URL", help="URL of live streaming if you want to record the streaming")
+    parser.add_argument("-vf", "--video-filename", type=str, metavar="VIDEO_FILENAME", help="video file to store recording to", default=None)
+
     args = parser.parse_args(remaining)
     args = parser.parse_args()
 
     if args.src_language:
         src = args.src_language
+        last_selected_src = src
+        src_file = open(src_filepath, "w")
+        src_file.write(src)
+        src_file.close()
 
     if args.dst_language:
         dst = args.dst_language
+        last_selected_dst = dst
+        dst_file = open(dst_filepath, "w")
+        dst_file.write(dst)
+        dst_file.close()
 
     if args.src_language not in map_language_of_src.keys():
         print("Audio language not supported. Run with --list-languages to see all supported languages.")
-        sys.exit(0)
+        parser.exit(0)
 
     if args.dst_language not in map_language_of_dst.keys():
         print("Destination language not supported. Run with --list-languages to see all supported languages.")
-        sys.exit(0)
+        parser.exit(0)
 
-    if args.list_languages:
-        print("List of all languages:")
-        for code, language in sorted(map_src_of_language.items()):
+    if args.list_languages_src:
+        print("List of all source languages:")
+        for code, language in sorted(map_language_of_src.items()):
             print("{code}\t{language}".format(code=code, language=language))
-        sys.exit(0)
+        parser.exit(0)
+
+    if args.list_languages_dst:
+        print("List of all destination languages:")
+        for code, language in sorted(map_language_of_dst.items()):
+            print("{code}\t{language}".format(code=code, language=language))
+        parser.exit(0)
 
     if args.device:
         Device = args.device
@@ -959,57 +1549,66 @@ def main():
     if args.samplerate:
         SampleRate = args.samplerate
 
-    if args.filename:
-        Filename = args.filename
-        dump_fn = open(args.filename, "wb")
+    if args.audio_filename:
+        wav_file_name = args.audio_filename
+        dump_fn = open(args.audio_filename, "wb")
     else:
         dump_fn = None
 
+    if args.subtitle_format not in FORMATTERS.keys():
+        FONT_TYPE = "Helvetica"
+        FONT_SIZE = 9
+        sg.set_options(font=(FONT_TYPE, FONT_SIZE))
+        sg.Popup("Subtitle format is not supported, you can choose it later when you save transcriptions.", title="Info")
 
-#-----------------------------------------------------------GUI STARTS-----------------------------------------------------------#
+    if args.video_filename:
+        saved_recorded_streaming_basename, saved_recorded_streaming_extension = os.path.splitext(os.path.basename(args.video_filename))
+        saved_recorded_streaming_extension = saved_recorded_streaming_extension[1:]
+        if saved_recorded_streaming_extension != "mp4":
+            saved_recorded_streaming_filename = "{base}.{format}".format(base=saved_recorded_streaming_basename, format="mp4")
+        else:
+            saved_recorded_streaming_filename = args.video_filename
 
-    xmax,ymax=sg.Window.get_screen_size()
-    wsizex=int(0.5*xmax)
-    wsizey=int(0.5*ymax)
-    mlszx=int(0.15*wsizex)
-    mlszy=int(0.018*wsizey)
 
-    if not args.src_language==None:
-        combo_src=map_language_of_src[args.src_language]
-    else:
-        combo_src='English'
+#-------------------------------------REMAINING GUI PARTS NEEDED TO LOAD AT LAST BEFORE MAIN LOOP-------------------------------------#
 
-    if not args.dst_language==None:
-        combo_dst=map_language_of_dst[args.dst_language]
-    else:
-        combo_dst='Indonesian'
-
-    layout = [[sg.Text('Click Start to start listening and printing it on screen', expand_x=True, expand_y=True, key='-MAIN-')],
-              [sg.Text('Audio language      ', expand_x=True, expand_y=True),
-               sg.Combo(list(map_src_of_language), default_value=combo_src, expand_x=True, expand_y=True, key='-SRC-')],
-              [sg.Multiline(size=(mlszx, mlszy), expand_x=True, expand_y=True, key='-ML1-')],
-              [sg.Text('Translation language', expand_x=True, expand_y=True),
-               sg.Combo(list(map_dst_of_language), default_value=combo_dst, expand_x=True, expand_y=True, key='-DST-')],
-              [sg.Multiline(size=(mlszx, mlszy), expand_x=True, expand_y=True, key='-ML2-')],
-              [sg.Button('Start', expand_x=True, expand_y=True, button_color=('white', '#283b5b'), key='-START-BUTTON-'),
-               sg.Button('Exit', expand_x=True, expand_y=True)]]
 
     main_window = sg.Window('VOSK Live Subtitles', layout, resizable=True, keep_on_top=True, finalize=True)
     main_window['-SRC-'].block_focus()
 
-    if  (sys.platform == "win32"):
-        main_window.TKroot.attributes('-topmost', True)
-        main_window.TKroot.attributes('-topmost', False)
+    if (platform.system() == "Windows"):
+        if main_window.TKroot is not None:
+            main_window.TKroot.attributes('-topmost', True)
+            main_window.TKroot.attributes('-topmost', False)
 
-    if not (sys.platform == "win32"):
-        main_window.TKroot.attributes('-topmost', 1)
-        main_window.TKroot.attributes('-topmost', 0)
+    if not (platform.system() == "Windows"):
+        if main_window.TKroot is not None:
+            main_window.TKroot.attributes('-topmost', 1)
+            main_window.TKroot.attributes('-topmost', 0)
 
+    main_window.finalize()
     overlay_translation_window = None
-    recognizing = False
+    move_center(main_window)
+    
+    if args.src_language:
+        combo_src = map_language_of_src[args.src_language]
+        main_window['-SRC-'].update(combo_src)
+
+    if args.dst_language:
+        combo_dst = map_language_of_dst[args.dst_language]
+        main_window['-DST-'].update(combo_dst)
+
+    if args.url:
+        is_valid_url_streaming = is_streaming_url(args.url)
+        #print("is_valid_url_streaming = {}".format(is_valid_url_streaming))
+        if is_valid_url_streaming:
+            url = args.url
+            main_window['-URL-'].update(url)
+            main_window['-RECORD-STREAMING-'].update(True)
 
 
 #---------------------------------------------------------------MAIN LOOP--------------------------------------------------------------#
+
 
     while True:
         window, event, values = sg.read_all_windows(500)
@@ -1017,76 +1616,419 @@ def main():
         #print('event =', event)
         #print('recognizing =', recognizing)
 
-        src=map_src_of_language[str(main_window['-SRC-'].get())]
-        dst=map_dst_of_language[str(main_window['-DST-'].get())]
+        src = map_src_of_language[str(main_window['-SRC-'].get())]
+        last_selected_src = src
+        src_file = open(src_filepath, "w")
+        src_file.write(src)
+        src_file.close()
 
-        if event == 'Exit' or sg.WIN_CLOSED:
+        dst = map_dst_of_language[str(main_window['-DST-'].get())]
+        last_selected_dst = dst
+        dst_file = open(dst_filepath, "w")
+        dst_file.write(dst)
+        dst_file.close()
+
+        if event == 'Exit' or event == sg.WIN_CLOSED:
             break
+
+
+        elif event == '-RECORD-STREAMING-':
+            if values['-RECORD-STREAMING-']:
+                is_valid_url_streaming = is_streaming_url(str(values['-URL-']).strip())
+                if not is_valid_url_streaming:
+                    FONT_TYPE = "Helvetica"
+                    FONT_SIZE = 9
+                    sg.set_options(font=(FONT_TYPE, FONT_SIZE))
+                    sg.Popup('Invalid URL, please enter a valid URL.                   ', title="Info")
+                    main_window['-RECORD-STREAMING-'].update(False)
+
 
         elif event == '-START-BUTTON-':
             recognizing = not recognizing
             #print('Start button clicked, changing recognizing status')
             #print('recognizing =', recognizing)
+
             main_window['-START-BUTTON-'].update(('Stop','Start')[not recognizing], button_color=(('white', ('red', '#283b5b')[not recognizing])))
 
             if recognizing:
                 #print('VOSK Live Subtitle is START LISTENING now')
                 #print('recognizing =', recognizing)
 
+                start_button_click_time = datetime.now()
+                #print("start_button_click_time = {}".format(start_button_click_time))
+
+                if main_window['-URL-'].get() != (None or "") and main_window['-RECORD-STREAMING-'].get() == True:
+
+                    if is_valid_url_streaming:
+
+                        url = values['-URL-']
+
+                        tmp_recorded_streaming_filename = "record.mp4"
+                        tmp_recorded_streaming_filepath = os.path.join(tempfile.gettempdir(), tmp_recorded_streaming_filename)
+
+                        get_tmp_recorded_streaming_filepath_time = datetime.now()
+                        #print("get_tmp_recorded_streaming_filepath_time = {}".format(get_tmp_recorded_streaming_filepath_time))
+
+                        #NEEDED FOR streamlink MODULE TO RUN AS PYINSTALLER COMPILED BINARY
+                        os.environ['STREAMLINK_DIR'] = './streamlink/'
+                        os.environ['STREAMLINK_PLUGINS'] = './streamlink/plugins/'
+                        os.environ['STREAMLINK_PLUGIN_DIR'] = './streamlink/plugins/'
+
+                        streamlink = Streamlink()
+                        streams = streamlink.streams(url)
+                        stream_url = streams['360p']
+
+                        # WINDOWS AND LINUX HAS DIFFERENT BEHAVIOR WHEN RUNNING FFMPEG AS THREAD
+                        if platform.system() == "Windows":
+                            thread_record_streaming = threading.Thread(target=record_streaming_windows, args=(stream_url.url, tmp_recorded_streaming_filepath), daemon=True)
+                            thread_record_streaming.start()
+
+                        elif platform.system() == "Linux":
+                            thread_record_streaming = threading.Thread(target=record_streaming_linux, args=(stream_url.url, tmp_recorded_streaming_filepath))
+                            thread_record_streaming.start()
+
+                    else:
+                        FONT_TYPE = "Helvetica"
+                        FONT_SIZE = 9
+                        sg.set_options(font=(FONT_TYPE, FONT_SIZE))
+                        sg.Popup('Invalid URL, please enter a valid URL.                   ', title="Info")
+                        recognizing = False
+                        main_window['-START-BUTTON-'].update(('Stop','Start')[not recognizing], button_color=(('white', ('red', '#283b5b')[not recognizing])))
+                        main_window['-RECORD-STREAMING-'].update(False)
+
+                # SHOWING OVERLAY TRANSLATION WINDOW
                 if not overlay_translation_window:
                     overlay_translation_window = make_overlay_translation_window(100*' ')
                     overlay_translation_window.Hide()
 
-                listening_thread=threading.Thread(target=listen_worker_thread, args=(src,dst), daemon=True)
-                listening_thread.start()
+                regions = []
+                transcripts = []
 
-                timer = threading.Thread(target=timed_translate, args=(src, dst), daemon=True)
-                timer.start()
+                if main_window['-URL-'].get() != (None or "") and main_window['-RECORD-STREAMING-'].get() == True:
+                    time.sleep(1)
+
+                src_tmp_txt_transcription_filename = "record.txt"
+                src_tmp_txt_transcription_filepath = os.path.join(tempfile.gettempdir(), src_tmp_txt_transcription_filename)
+                src_tmp_txt_transcription_file = open(src_tmp_txt_transcription_filepath, "w")
+                src_tmp_txt_transcription_file.write("")
+                src_tmp_txt_transcription_file.close()
+
+                src_tmp_txt_transcription_filename = "record.translated.txt"
+                src_tmp_txt_transcription_filepath = os.path.join(tempfile.gettempdir(), src_tmp_txt_transcription_filename)
+                src_tmp_txt_transcription_file = open(src_tmp_txt_transcription_filepath, "w")
+                src_tmp_txt_transcription_file.write("")
+                src_tmp_txt_transcription_file.close()
+
+                thread_recognize = threading.Thread(target=worker_recognize, args=(src,), daemon=True)
+                thread_recognize.start()
+
+                thread_timed_translate = threading.Timer(0.2, worker_timed_translate, args=(src, dst))
+                thread_timed_translate.daemon = True
+                thread_timed_translate.start()
+
+                main_window.TKroot.after(100, check_thread_status)
 
             else:
                 #print('VOSK Live Subtitle is STOP LISTENING now')
                 #print('recognizing =', recognizing)
 
+                if main_window['-URL-'].get() != (None or "") and main_window['-RECORD-STREAMING-'].get() == True:
+
+                    if platform.system() == "Windows":
+                        #print("thread_record_streaming.is_alive() = {}".format(thread_record_streaming.is_alive()))
+                        stop_record_streaming_windows()
+
+                    elif platform.system() == "Linux":
+                        #print("thread_record_streaming.is_alive() = {}".format(thread_record_streaming.is_alive()))
+                        stop_record_streaming_linux()
+
                 text=''
-                main_window['-ML1-'].update(text,background_color_for_value='yellow1',autoscroll=True)
+                main_window['-ML1-'].update(text, background_color_for_value='yellow1', autoscroll=True)
                 translated_text=''
-                main_window['-ML2-'].update(translated_text,background_color_for_value='yellow1',autoscroll=True)
+                main_window['-ML2-'].update(translated_text, background_color_for_value='yellow1', autoscroll=True)
 
                 if overlay_translation_window:
                     overlay_translation_window.close()
                     overlay_translation_window=None
 
-            if not (sys.platform == "win32"):
+                # SAVING TRANSCRIPTIONS IN A TEMPORARY SUBTITLE FILE
+                #print("Saving transcriptions")
+                timed_subtitles = [(r, t) for r, t in zip(regions, transcripts) if t]
+                subtitle_format = "srt"
+                formatter = FORMATTERS.get(subtitle_format)
+                formatted_subtitles = formatter(timed_subtitles)
+
+                if main_window['-URL-'].get() != (None or "") and main_window['-RECORD-STREAMING-'].get() == True:
+                    tmp_src_subtitle_basename, extension = os.path.splitext(os.path.basename(tmp_recorded_streaming_filepath))
+                    tmp_src_subtitle_filename = tmp_src_subtitle_basename + "." + subtitle_format
+                    tmp_src_subtitle_filepath = os.path.join(tempfile.gettempdir(), tmp_src_subtitle_filename)
+                else:
+                    tmp_src_subtitle_filename = "record" + "." + subtitle_format
+                    tmp_src_subtitle_filepath = os.path.join(tempfile.gettempdir(), tmp_src_subtitle_filename)
+
+                tmp_src_subtitle_file = open(tmp_src_subtitle_filepath, 'wb')
+                tmp_src_subtitle_file.write(formatted_subtitles.encode("utf-8"))
+                tmp_src_subtitle_file.close()
+
+                # SAVING TRANSCRIPTIONS AS FORMATTED SUBTITLE FILE WITH FILENAME DECLARED IN COMMAND LINE ARGUMENTS
+                if args.subtitle_filename:
+                    subtitle_file_base, subtitle_file_extension = os.path.splitext(args.subtitle_filename)
+                    subtitle_file_extension = subtitle_file_extension[1:]
+                    #print("subtitle_file_base = {}".format(subtitle_file_base))
+                    #print("subtitle_file_extension = {}".format(subtitle_file_extension))
+
+                    if subtitle_file_extension and subtitle_file_extension in FORMATTERS.keys():
+                        #print("subtitle_file_extension in FORMATTERS.keys()")
+                        subtitle_filepath = "{base}.{format}".format(base=subtitle_file_base, format=subtitle_file_extension)
+                        timed_subtitles = [(r, t) for r, t in zip(regions, transcripts) if t]
+                        subtitle_format = subtitle_file_extension
+                        formatter = FORMATTERS.get(subtitle_format)
+                        formatted_subtitles = formatter(timed_subtitles)
+                        subtitle_file = open(subtitle_filepath, 'wb')
+                        subtitle_file.write(formatted_subtitles.encode("utf-8"))
+                        subtitle_file.close()
+                    else:
+                        #print("subtitle_file_extension not in FORMATTERS.keys()")
+                        FONT_TYPE = "Helvetica"
+                        FONT_SIZE = 9
+                        sg.set_options(font=(FONT_TYPE, FONT_SIZE))
+                        sg.Popup("Subtitle format you typed is not supported, subtitle file will be saved in TXT format.", title="Info")
+                        subtitle_filepath = "{base}.{format}".format(base=subtitle_file_base, format="txt")
+                        shutil.copy(src_tmp_txt_transcription_filepath, subtitle_filepath)
+
+                if thread_record_streaming and thread_record_streaming.is_alive():
+                    if platform.system() == "Windows":
+                        stop_record_streaming_windows()
+
+                    elif platform.system() == "Linux":
+                        stop_record_streaming_linux()
+
+                # SAVING TEMPORARY TRANSLATED TRANSCRIPTIONS AS FORMATTED SUBTITLE FILE
+                #print("Saving translated transcriptions")
+                created_regions = []
+                created_subtitles = []
+                for entry in timed_subtitles:
+                    created_regions.append(entry[0])
+                    created_subtitles.append(entry[1])
+
+                translated_transcriptions = []
+                i = 0
+                progressbar = make_progress_bar_window(len(created_subtitles), "Saving translated transcriptions...")
+                for created_subtitle in created_subtitles:
+                    translated_transcription = GoogleTranslate(created_subtitle, src, dst)
+                    translated_transcriptions.append(translated_transcription)
+                    i += 1
+                    progressbar['-INFO-'].update('Saving translated transcriptions...')
+                    progressbar['-PERCENTAGE-'].update(f'{int(i*100/len(created_subtitles))}%')
+                    progressbar['-PROGRESS-'].update(i)
+                progressbar['-INFO-'].update('Saving translated transcriptions...')
+                progressbar['-PERCENTAGE-'].update(f'{int(len(created_subtitles)*100/len(created_subtitles))}%')
+                progressbar['-PROGRESS-'].update(len(created_subtitles))
+                time.sleep(1)
+                progressbar.close()
+
+                timed_translated_subtitles = [(r, t) for r, t in zip(created_regions, translated_transcriptions) if t]
+                formatter = FORMATTERS.get(subtitle_format)
+                formatted_translated_subtitles = formatter(timed_translated_subtitles)
+
+                tmp_dst_subtitle_filepath = tmp_src_subtitle_filepath[ :-4] + ".translated." + subtitle_format
+
+                with open(tmp_dst_subtitle_filepath, 'wb') as f:
+                    f.write(formatted_translated_subtitles.encode("utf-8"))
+                f.close()
+
+                with open(tmp_dst_subtitle_filepath, 'a') as f:
+                    f.write("\n")
+                f.close()
+
+                # SAVING TEMPORARY TRANSLATED TRANSCRIPTION AS TEXT FILE
+                with open(dst_tmp_txt_transcription_filepath, 'w') as f:
+                    for i in range(len(translated_transcriptions)):
+
+                        start_time_delta = timedelta(seconds=created_regions[i][0])
+                        start_time_str = "{:02d}:{:02d}:{:02.0f}.{:03.0f}".format(
+                            start_time_delta.seconds // 3600,  # hours
+                            (start_time_delta.seconds // 60) % 60,  # minutes
+                            start_time_delta.seconds % 60, # seconds
+                            start_time_delta.microseconds / 1000000  # microseconds
+                        )
+
+                        end_time_delta = timedelta(seconds=created_regions[i][1])
+                        end_time_str = "{:02d}:{:02d}:{:02.0f}.{:03.0f}".format(
+                            end_time_delta.seconds // 3600,  # hours
+                            (end_time_delta.seconds // 60) % 60,  # minutes
+                            end_time_delta.seconds % 60, # seconds
+                            end_time_delta.microseconds / 1000000  # microseconds
+                        )
+
+                        time_stamp_string = start_time_str + "-" + end_time_str
+                        f.write(time_stamp_string + " " + translated_transcriptions[i] + "\n")
+
+                f.close()
+
+
+                # SAVING TRANSLATED SUBTITLE FILE WITH FILENAME BASED ON SUBTITLE FILENAME DECLARED IN COMMAND LINE ARGUMENTS
+                if args.subtitle_filename:
+
+                    saved_dst_subtitle_filepath = subtitle_filepath[ :-4] + ".translated." + subtitle_format
+
+                    if subtitle_file_extension and subtitle_file_extension in FORMATTERS.keys():
+                        timed_translated_subtitles = [(r, t) for r, t in zip(created_regions, translated_transcriptions) if t]
+                        subtitle_format = subtitle_file_extension
+                        formatter = FORMATTERS.get(subtitle_format)
+                        formatted_translated_subtitles = formatter(timed_translated_subtitles)
+                        saved_dst_subtitle_file = open(saved_dst_subtitle_filepath, 'wb')
+                        saved_dst_subtitle_file.write(formatted_translated_subtitles.encode("utf-8"))
+                        saved_dst_subtitle_file.close()
+                    else:
+                        shutil.copy(dst_tmp_txt_transcription_filepath, saved_dst_subtitle_filepath)
+
+                if args.video_filename:
+                    shutil.copy(tmp_recorded_streaming_filepath, saved_recorded_streaming_filename)
+
+            if not (platform.system() == "Windows"):
                 main_window.TKroot.attributes('-topmost', 1)
                 main_window.TKroot.attributes('-topmost', 0)
 
 
-        elif event=='-VOICE-RECOGNIZED-' and recognizing==True:
+        elif event == '-EVENT-VOICE-RECOGNIZED-' and recognizing==True:
+
             text=str(values[event]).strip().lower()
             main_window['-ML1-'].update(text,background_color_for_value='yellow1',autoscroll=True)
             
-            #if overlay_voice_window: overlay_voice_window['-ML-LS1-'].update(text,background_color_for_value='black',autoscroll=True)
-
-            if not (sys.platform == "win32"):
+            if not (platform.system() == "Windows"):
                 main_window.TKroot.attributes('-topmost', 1)
                 main_window.TKroot.attributes('-topmost', 0)
 
 
-        elif event=='-VOICE-TRANSLATED-' and recognizing==True:
+        elif event == '-EVENT-VOICE-TRANSLATED-' and recognizing==True:
+
             overlay_translation_window.UnHide()
             translated_text=str(values[event]).strip().lower()
             main_window['-ML2-'].update(translated_text,background_color_for_value='yellow1',autoscroll=True)
-            
-            if (overlay_translation_window):
-                overlay_translation_window['-ML-LS2-'].update(translated_text,background_color_for_value='black',autoscroll=True)
 
-            if not (sys.platform == "win32"):
+            if (overlay_translation_window):
+                overlay_translation_window['-ML-LS2-'].update(translated_text,background_color_for_value='black', autoscroll=True)
+
+            if not (platform.system() == "Windows"):
                 main_window.TKroot.attributes('-topmost', 1)
                 main_window.TKroot.attributes('-topmost', 0)
 
+
+        elif event == '-EVENT-STREAMING-DURATION-RECORDED-':
+
+            record_duration = str(values[event]).strip()
+            main_window['-STREAMING-DURATION-RECORDED-'].update(record_duration)
+
+
+        elif event == '-EVENT-THREAD-RECORD-STREAMING-STATUS-':
+
+            msg = str(values[event]).strip()
+            main_window['-RECORD-STREAMING-STATUS-'].update(msg)
+
+            if "RUNNING" in msg:
+                main_window['-RECORD-STREAMING-STATUS-'].update(text_color='white', background_color='red')
+                main_window['-STREAMING-DURATION-RECORDED-'].update(text_color='white', background_color='red')
+            else:
+                main_window['-RECORD-STREAMING-STATUS-'].update(text_color='black', background_color='green1')
+                main_window['-STREAMING-DURATION-RECORDED-'].update(text_color='black', background_color='green1')
+
+
+        elif event == '-EVENT-SAVE-RECORDED-STREAMING-':
+
+            tmp_recorded_streaming_filename = "record.mp4"
+            tmp_recorded_streaming_filepath = os.path.join(tempfile.gettempdir(), tmp_recorded_streaming_filename)
+
+            if os.path.isfile(tmp_recorded_streaming_filepath):
+
+                saved_recorded_streaming_filename = sg.popup_get_file('', no_window=True, save_as=True, font=(FONT_TYPE, FONT_SIZE), default_path=saved_recorded_streaming_filename, file_types=video_file_types)
+
+                if saved_recorded_streaming_filename:
+                    shutil.copy(tmp_recorded_streaming_filepath, saved_recorded_streaming_filename)
+
+            else:
+                FONT_TYPE = "Helvetica"
+                FONT_SIZE = 9
+                sg.set_options(font=(FONT_TYPE, FONT_SIZE))
+                sg.Popup("No streaming was recorded.                             ", title="Info")
+
+
+        elif event == '-EVENT-SAVE-SRC-TRANSCRIPTION-':
+            if os.path.isfile(src_tmp_txt_transcription_filepath):
+
+                saved_src_subtitle_filename = sg.popup_get_file('', no_window=True, save_as=True, font=(FONT_TYPE, FONT_SIZE), file_types=subtitle_file_types)
+
+                if saved_src_subtitle_filename:
+
+                    selected_subtitle_format = saved_src_subtitle_filename.split('.')[-1]
+
+                    if selected_subtitle_format in FORMATTERS.keys():
+                        timed_subtitles = [(r, t) for r, t in zip(regions, transcripts) if t]
+                        subtitle_format = selected_subtitle_format
+                        formatter = FORMATTERS.get(subtitle_format)
+                        formatted_subtitles = formatter(timed_subtitles)
+                        tmp_src_subtitle_filename = saved_src_subtitle_filename
+                        subtitle_file = open(tmp_src_subtitle_filename, 'wb')
+                        subtitle_file.write(formatted_subtitles.encode("utf-8"))
+                        subtitle_file.close()
+                    else:
+                        saved_src_subtitle_file = open(saved_src_subtitle_filename, "w")
+                        src_tmp_txt_transcription_file = open(src_tmp_txt_transcription_filepath, "r")
+                        for line in src_tmp_txt_transcription_file:
+                            if line:
+                                saved_src_subtitle_file.write(line)
+                        saved_src_subtitle_file.close()
+                        src_tmp_txt_transcription_file.close()
+
+            else:
+                FONT_TYPE = "Helvetica"
+                FONT_SIZE = 9
+                sg.set_options(font=(FONT_TYPE, FONT_SIZE))
+                sg.Popup("No transcriptions was recorded.                             ", title="Info")
+
+
+        elif event == '-EVENT-SAVE-DST-TRANSCRIPTION-':
+
+            if os.path.isfile(dst_tmp_txt_transcription_filepath):
+
+                saved_dst_subtitle_filename = sg.popup_get_file('', no_window=True, save_as=True, font=(FONT_TYPE, FONT_SIZE), file_types=subtitle_file_types)
+
+                if saved_dst_subtitle_filename:
+
+                    selected_subtitle_format = saved_dst_subtitle_filename.split('.')[-1]
+
+                    if selected_subtitle_format in FORMATTERS.keys():
+                        timed_translated_subtitles = [(r, t) for r, t in zip(created_regions, translated_transcriptions) if t]
+                        subtitle_format = selected_subtitle_format
+                        formatter = FORMATTERS.get(subtitle_format)
+                        formatted_translated_subtitles = formatter(timed_translated_subtitles)
+                        saved_dst_subtitle_file = open(saved_dst_subtitle_filename, 'wb')
+                        saved_dst_subtitle_file.write(formatted_translated_subtitles.encode("utf-8"))
+                        saved_dst_subtitle_file.close()
+                    else:
+                        saved_dst_subtitle_file = open(saved_dst_subtitle_filename, "w")
+                        dst_tmp_txt_transcription_file = open(dst_tmp_txt_transcription_filepath, "r")
+                        for line in dst_tmp_txt_transcription_file:
+                            if line:
+                                saved_dst_subtitle_file.write(line)
+                        saved_dst_subtitle_file.close()
+                        dst_tmp_txt_transcription_file.close()
+            else:
+                FONT_TYPE = "Helvetica"
+                FONT_SIZE = 9
+                sg.set_options(font=(FONT_TYPE, FONT_SIZE))
+                sg.Popup("No translated transcriptions was recorded.                 ", title="Info")
+
+
+    if thread_recognize and thread_recognize.is_alive():
+        stop_thread(thread_recognize)
+
+    if thread_timed_translate and thread_timed_translate.is_alive():
+        stop_thread(thread_timed_translate)
+
     main_window.close()
+    sys.exit(0)
 
 
 if __name__ == "__main__":
     main()
-
