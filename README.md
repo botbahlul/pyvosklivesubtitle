@@ -37,7 +37,7 @@ When you run this app for the very first time it may takes some times to downloa
 
 You can always download those small models manually from https://alphacephei.com/vosk/models then extract them to that used folder.
 
-You can try to compile that script in win folder (if your OS is Windows) or linux folder (if your OS is Linux) into a single executable file with pyinstaller :
+You can try to compile that script in win folder (if your OS is Windows) or linux folder (if your OS is Linux) into a single executable file with pyinstaller:
 ```
 pip install pyinstaller
 pyinstaller --onefile pyvls.py
