@@ -44,6 +44,11 @@ pyinstaller --onefile pyvls.py
 ```
 The executable compiled file will be placed by pyinstaller into dist subfolder of your current working folder, then you can just put that compiled exe file into a folder that has been added to your PATH ENVIRONTMENT so you can execute it from anywhere.
 
+NOTES :
+START FROM VERSION 0.1.1 YOU SHOULD USE THAT "mypyinstaller.bat" (or "mypyinstaller.sh" IF YOU'RE ON LINUX) TO COMPILE WITH pyinstaller.
+
+THAT "streamlink" MODULE FOLDER MUST BE ON SAME FOLDER WITH "pyvls.pyw" and "mypyinstaller.bat", OR YOU CAN CHANGE THE LOCATION FOLDER BY EDITING "mypyinstaller.bat".
+
 DONT FORGET TO PLACE THOSE LIBS FILES FROM VOSK (libgcc_s_seh-1.dll, libstdc++-6.dll, libvosk.dll, & libwinpthread-1.dll if your OS is Windows, libvosk.so if your OS is Linux) INTO SAME FOLDER WITH COMPILED EXE FILE!
 
 I was succesfuly compiled it in Windows 10 with pyinstaller-5.1 and Pyhton-3.10.4, and python-3.8.12 in Debian 9
