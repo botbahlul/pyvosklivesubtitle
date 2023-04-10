@@ -1501,7 +1501,7 @@ def main():
     parser.add_argument("-af", "--audio-filename", type=str, metavar="AUDIO_FILENAME", help="audio file to store recording to")
     parser.add_argument("-d", "--device", type=int_or_str, help="input device (numeric ID or substring)")
     parser.add_argument("-r", "--samplerate", type=int, help="sampling rate in Hertz for example 8000, 16000, 44100, or 48000")
-    parser.add_argument('-v', '--version', action='version', version='0.1.1')
+    parser.add_argument('-v', '--version', action='version', version='0.1.2')
 
     parser.add_argument("-u", "--url", type=str, metavar="URL", help="URL of live streaming if you want to record the streaming")
     parser.add_argument("-vf", "--video-filename", type=str, metavar="VIDEO_FILENAME", help="video file to store recording to", default=None)
@@ -1524,11 +1524,11 @@ def main():
         dst_file.close()
 
     if args.src_language not in map_language_of_src.keys():
-        print("Audio language not supported. Run with --list-languages to see all supported languages.")
+        print("Audio language not supported. Run with --list-languages-src to see all supported source languages.")
         parser.exit(0)
 
     if args.dst_language not in map_language_of_dst.keys():
-        print("Destination language not supported. Run with --list-languages to see all supported languages.")
+        print("Destination language not supported. Run with --list-languages-dst to see all supported destination languages.")
         parser.exit(0)
 
     if args.list_languages_src:
