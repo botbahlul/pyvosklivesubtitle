@@ -47,6 +47,8 @@ setup(
         "streamlink>=5.3.1",
         "six>=1.16.0",
         "pysrt>=1.1.2",
+        "requests>=2.27.1",
+        "tqdm>=4.64.0",
     ],
     license=open("LICENSE").read()
 )
