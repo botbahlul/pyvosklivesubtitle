@@ -80,9 +80,8 @@ To DRAG/MOVE that TRANSLATION TEXT anywhere on the screen, just USE CONTROL KEY 
 ### Usage
 
 ```
-pyvosklivesubtitle [-S SRC_LANGUAGE] [-D DST_LANGUAGE]
-
-for example : pyvosklivesubtitle -S ja -D en
+usage: pyvosklivesubtitle [-h] [-S SRC_LANGUAGE] [-D DST_LANGUAGE] [-lls] [-lld] [-sf SUBTITLE_FILENAME] [-F SUBTITLE_FORMAT] [-lsf]
+                          [-ld] [-af AUDIO_FILENAME] [-d DEVICE] [-r SAMPLERATE] [-u URL] [-vf VIDEO_FILENAME] [-v]
 
 options:
   -h, --help            show this help message and exit
@@ -90,15 +89,26 @@ options:
                         Spoken language
   -D DST_LANGUAGE, --dst-language DST_LANGUAGE
                         Desired language for translation
-  -ll, --list-languages
-                        List all available source/destination languages
+  -lls, --list-languages-src
+                        List all available source languages
+  -lld, --list-languages-dst
+                        List all available destination languages
+  -sf SUBTITLE_FILENAME, --subtitle-filename SUBTITLE_FILENAME
+                        Subtitle file name for saved transcriptions
+  -F SUBTITLE_FORMAT, --subtitle-format SUBTITLE_FORMAT
+                        Desired subtitle format for saved transcriptions (default is "srt")
+  -lsf, --list-subtitle-formats
+                        List all available subtitle formats
   -ld, --list-devices   show list of audio devices and exit
-  -f FILENAME, --filename FILENAME
+  -af AUDIO_FILENAME, --audio-filename AUDIO_FILENAME
                         audio file to store recording to
   -d DEVICE, --device DEVICE
                         input device (numeric ID or substring)
   -r SAMPLERATE, --samplerate SAMPLERATE
                         sampling rate in Hertz for example 8000, 16000, 44100, or 48000
+  -u URL, --url URL     URL of live streaming if you want to record the streaming
+  -vf VIDEO_FILENAME, --video-filename VIDEO_FILENAME
+                        video file to store recording to
   -v, --version         show program's version number and exit
 ```
 
