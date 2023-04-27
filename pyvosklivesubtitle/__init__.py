@@ -1205,7 +1205,7 @@ class SentenceTranslator(object):
                 fail_to_translate = False
         return translated_sentence
 
-
+'''
 def GoogleTranslate(text, src, dst):
     url = 'https://translate.googleapis.com/translate_a/'
     params = 'single?client=gtx&sl='+src+'&tl='+dst+'&dt=t&q='+text;
@@ -1225,6 +1225,21 @@ def GoogleTranslate(text, src, dst):
                     translation = translation + response_json[i][0]
                 return translation
         return
+'''
+
+def GoogleTranslate(text, src, dst):
+    url = 'https://translate.googleapis.com/translate_a/'
+    params = 'single?client=gtx&sl='+src+'&tl='+dst+'&dt=t&q='+text;
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)', 'Referer': 'https://translate.google.com',}
+    response = requests.get(url+params, headers=headers)
+    if response.status_code == 200:
+        response_json = response.json()[0]
+        length = len(response_json)
+        translation = ""
+        for i in range(length):
+            translation = translation + response_json[i][0]
+        return translation
+    return
 
 
 def worker_timed_translate(src, dst):
@@ -2570,7 +2585,7 @@ def main():
     parser.add_argument("-u", "--url", type=str, metavar="URL", help="URL of live streaming if you want to record the streaming")
     parser.add_argument("-vf", "--video-filename", type=str, metavar="VIDEO_FILENAME", help="video file to store recording to", default=None)
 
-    parser.add_argument('-v', '--version', action='version', version='0.1.4')
+    parser.add_argument('-v', '--version', action='version', version='0.1.5')
 
     args = parser.parse_args(remaining)
     args = parser.parse_args()
