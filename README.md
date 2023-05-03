@@ -2,11 +2,7 @@
 
 ### PySimpleGUI based DESKTOP APP that can RECOGNIZE any LIVE STREAMING in 21 languages that supported by VOSK then TRANSLATE (using unofficial online Google Translate API) and display it as LIVE CAPTION / LIVE SUBTITLE
 
-
-
 https://user-images.githubusercontent.com/88623122/221994235-0ee3cfa5-26f7-4e53-881d-cdef06fe3f60.mp4
-
-
 
 The speech recognition part is using vosk python module https://pypi.org/project/vosk/
 ```
@@ -48,6 +44,12 @@ pyinstaller --onefile pyvls.py
 The executable compiled file will be placed by pyinstaller into dist subfolder of your current working folder, then you can just put that compiled exe file into a folder that has been added to your PATH ENVIRONTMENT so you can execute it from anywhere.
 
 NOTES :
+THIS APP USE streamlink MODULE WHICH SUPPORTS ONLY urllib3 version < 1.x BRANCH, SO IF YOU'VE ALREADY INSTALLED urllib3 version 2.x AND ABOVE THIS APP WON'T WORK. IF YOU'RE STILL WANT TO INSTALL THIS APP TRY TO REINSTALL streamlink WITH --force-reinstall ARGUMENT.
+
+```
+pip install streamlink --force-reinstall
+```
+
 START FROM VERSION 0.1.2 YOU SHOULD USE THAT "mypyinstaller.bat" (or "mypyinstaller.sh" IF YOU'RE ON LINUX) TO COMPILE WITH pyinstaller.
 
 THAT "streamlink" MODULE FOLDER MUST BE ON SAME FOLDER WITH "pyvls.pyw" and "mypyinstaller.bat", OR YOU CAN CHANGE THE LOCATION FOLDER BY EDITING "mypyinstaller.bat".
