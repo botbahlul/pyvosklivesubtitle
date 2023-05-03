@@ -44,6 +44,7 @@ pyinstaller --onefile pyvls.py
 The executable compiled file will be placed by pyinstaller into dist subfolder of your current working folder, then you can just put that compiled exe file into a folder that has been added to your PATH ENVIRONTMENT so you can execute it from anywhere.
 
 NOTES :
+
 START FROM VERSION 0.1.2 THIS APP USE streamlink MODULE WHICH SUPPORTS ONLY urllib3 version <= 1.x BRANCH, SO IF YOU'VE ALREADY INSTALLED urllib3 version 2.x AND ABOVE THIS APP WON'T WORK. IF YOU'RE STILL WANT TO INSTALL THIS APP TRY TO REINSTALL streamlink WITH --force-reinstall ARGUMENT.
 
 ```
