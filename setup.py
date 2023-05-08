@@ -1,9 +1,9 @@
-    #!/usr/bin/env python3
+#!/usr/bin/env python3.8
 from __future__ import unicode_literals
-
 import sys
 import os
 import stat
+from pyvosklivesubtitle import VERSION
 
 #from setuptools import setup
 #from setuptools.command.install import install
@@ -13,6 +13,7 @@ try:
     from setuptools import setup
 except ImportError:
     from distutils.core import setup
+
 
 
 if sys.version_info < (2, 6):
@@ -25,10 +26,25 @@ long_description = (
     'in 21 languages that supported by VOSK then translate and display it as LIVE SUBTITLES'
     )
 
+install_requires=[
+    "sounddevice>=0.4.4",
+    "vosk>=0.3.44",
+    "pysimplegui>=4.60.1",
+    "httpx>=0.13.3",
+    "streamlink>=5.3.1",
+    "six>=1.16.0",
+    "pysrt>=1.1.2",
+    "requests>=2.27.1",
+    "tqdm>=4.64.0",
+]
+
+if sys.platform == "win32":
+    install_requires.append("pywin32>=306")
+
 setup(
     name="pyvosklivesubtitle",
     description="A Python based desktop aplication that can RECOGNIZE any live streaming in 21 languages that supported by VOSK then TRANSLATE and display it as LIVE SUBTITLES",
-    version="0.1.5",
+    version=VERSION,
     include_package_data=True,
     author='Bot Bahlul',
     author_email='bot.bahlul@gmail.com',
@@ -39,16 +55,6 @@ setup(
             'pyvosklivesubtitle = pyvosklivesubtitle:main',
         ],
     },
-    install_requires=[
-        'sounddevice>=0.4.4',
-        'vosk>=0.3.44',
-        'pysimplegui>=4.60.1',
-        "httpx>=0.13.3",
-        "streamlink>=5.3.1",
-        "six>=1.16.0",
-        "pysrt>=1.1.2",
-        "requests>=2.27.1",
-        "tqdm>=4.64.0",
-    ],
+    install_requires=install_requires,
     license=open("LICENSE").read()
 )
