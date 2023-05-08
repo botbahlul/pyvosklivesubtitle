@@ -19,7 +19,8 @@ from datetime import datetime, timedelta
 import subprocess
 import multiprocessing
 import ctypes
-import ctypes.wintypes
+if sys.platform == "win32":
+    import win32clipboard
 from streamlink import Streamlink
 from streamlink.exceptions import NoPluginError, StreamlinkError, StreamError
 import six
@@ -559,6 +560,8 @@ class BatchRecognizer(object):
 #=======================================================================================================================================#
 
 #============================================================== APP PARTS ==============================================================#
+
+VERSION = '0.1.6'
 
 arraylist_models = []
 arraylist_models.append("ca-es");
@@ -1181,65 +1184,130 @@ def worker_recognize(src, dst):
 
 
 class SentenceTranslator(object):
-    def __init__(self, src, dst, patience=-1):
+    def __init__(self, src, dst, patience=-1, timeout=30, error_messages_callback=None):
         self.src = src
         self.dst = dst
         self.patience = patience
+        self.timeout = timeout
+        self.error_messages_callback = error_messages_callback
 
     def __call__(self, sentence):
-        translated_sentence = []
-        # handle the special case: empty string.
-        if not sentence:
-            return None
+        try:
+            translated_sentence = []
+            # handle the special case: empty string.
+            if not sentence:
+                return None
+            translated_sentence = self.GoogleTranslate(sentence, src=self.src, dst=self.dst, timeout=self.timeout)
+            fail_to_translate = translated_sentence[-1] == '\n'
+            while fail_to_translate and patience:
+                translated_sentence = self.GoogleTranslate(translated_sentence, src=self.src, dst=self.dst, timeout=self.timeout).text
+                if translated_sentence[-1] == '\n':
+                    if patience == -1:
+                        continue
+                    patience -= 1
+                else:
+                    fail_to_translate = False
 
-        translated_sentence = GoogleTranslate(sentence, src=self.src, dst=self.dst)
+            return translated_sentence
 
-        fail_to_translate = translated_sentence[-1] == '\n'
-        while fail_to_translate and patience:
-            translated_sentence = GoogleTranslate(translated_sentence, src=self.src, dst=self.dst).text
-            if translated_sentence[-1] == '\n':
-                if patience == -1:
-                    continue
-                patience -= 1
+        except KeyboardInterrupt:
+            if self.error_messages_callback:
+                self.error_messages_callback("Cancelling all tasks")
             else:
-                fail_to_translate = False
-        return translated_sentence
+                print("Cancelling all tasks")
+            return
 
-'''
-def GoogleTranslate(text, src, dst):
-    url = 'https://translate.googleapis.com/translate_a/'
-    params = 'single?client=gtx&sl='+src+'&tl='+dst+'&dt=t&q='+text;
-    with httpx.Client(http2=True) as client:
-        client.headers.update({'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)', 'Referer': 'https://translate.google.com',})
-        response = client.get(url+params)
-        #print("response.status_code = {}".format(response.status_code))
-        if response.status_code == 200:
-            response_json = response.json()[0]
-            #print("response_json = {}".format(response_json))
-            if response_json!= None:
+        except Exception as e:
+            if self.error_messages_callback:
+                self.error_messages_callback(e)
+            else:
+                print(e)
+            return
+
+    def GoogleTranslate(self, text, src, dst, timeout=30):
+        url = 'https://translate.googleapis.com/translate_a/'
+        params = 'single?client=gtx&sl='+src+'&tl='+dst+'&dt=t&q='+text;
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)', 'Referer': 'https://translate.google.com',}
+
+        try:
+            response = requests.get(url+params, headers=headers, timeout=self.timeout)
+            if response.status_code == 200:
+                response_json = response.json()[0]
                 length = len(response_json)
-                #print("length = {}".format(length))
                 translation = ""
                 for i in range(length):
-                    #print("{} {}".format(i, response_json[i][0]))
                     translation = translation + response_json[i][0]
                 return translation
-        return
-'''
+            return
 
-def GoogleTranslate(text, src, dst):
+        except requests.exceptions.ConnectionError:
+            with httpx.Client() as client:
+                response = client.get(url+params, headers=headers, timeout=self.timeout)
+                if response.status_code == 200:
+                    response_json = response.json()[0]
+                    length = len(response_json)
+                    translation = ""
+                    for i in range(length):
+                        translation = translation + response_json[i][0]
+                    return translation
+                return
+
+        except KeyboardInterrupt:
+            if self.error_messages_callback:
+                self.error_messages_callback("Cancelling all tasks")
+            else:
+                print("Cancelling all tasks")
+            return
+
+        except Exception as e:
+            if self.error_messages_callback:
+                self.error_messages_callback(e)
+            else:
+                print(e)
+            return
+
+
+def GoogleTranslate(text, src, dst, timeout=30, error_messages_callback=None):
     url = 'https://translate.googleapis.com/translate_a/'
     params = 'single?client=gtx&sl='+src+'&tl='+dst+'&dt=t&q='+text;
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)', 'Referer': 'https://translate.google.com',}
-    response = requests.get(url+params, headers=headers)
-    if response.status_code == 200:
-        response_json = response.json()[0]
-        length = len(response_json)
-        translation = ""
-        for i in range(length):
-            translation = translation + response_json[i][0]
-        return translation
-    return
+
+    try:
+        response = requests.get(url+params, headers=headers, timeout=timeout)
+        if response.status_code == 200:
+            response_json = response.json()[0]
+            length = len(response_json)
+            translation = ""
+            for i in range(length):
+                translation = translation + response_json[i][0]
+            return translation
+        return
+
+    except requests.exceptions.ConnectionError:
+        with httpx.Client() as client:
+            response = client.get(url+params, headers=headers, timeout=timeout)
+            if response.status_code == 200:
+                response_json = response.json()[0]
+                length = len(response_json)
+                translation = ""
+                for i in range(length):
+                    translation = translation + response_json[i][0]
+                return translation
+            return
+
+    except KeyboardInterrupt:
+        if error_messages_callback:
+            error_messages_callback("Cancelling all tasks")
+        else:
+            print("Cancelling all tasks")
+        return
+
+    except Exception as e:
+        if error_messages_callback:
+            error_messages_callback(e)
+        else:
+            print(e)
+        return
 
 
 def worker_timed_translate(src, dst):
@@ -1256,7 +1324,7 @@ def worker_timed_translate(src, dst):
 
             n_words = len(partial_result.split())
             if partial_result and n_words % 3 == 0:
-                translated_text = GoogleTranslate(partial_result, src, dst)
+                translated_text = GoogleTranslate(partial_result, src, dst, error_messages_callback=show_error_messages)
                 main_window.write_event_value('-EVENT-VOICE-TRANSLATED-', translated_text)
 
 
@@ -1489,22 +1557,34 @@ def record_streaming_linux(url, output_file):
     return thread
 
 
-def stop_ffmpeg_windows():
+def stop_ffmpeg_windows(error_messages_callback=None):
+    try:
+        tasklist_output = subprocess.check_output(['tasklist'], creationflags=subprocess.CREATE_NO_WINDOW).decode('utf-8')
+        ffmpeg_pid = None
+        for line in tasklist_output.split('\n'):
+            if "ffmpeg" in line:
+                ffmpeg_pid = line.split()[1]
+                break
+        if ffmpeg_pid:
+            devnull = open(os.devnull, 'w')
+            subprocess.Popen(['taskkill', '/F', '/T', '/PID', ffmpeg_pid], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=True, creationflags=subprocess.CREATE_NO_WINDOW)
 
-    tasklist_output = subprocess.check_output(['tasklist'], creationflags=subprocess.CREATE_NO_WINDOW).decode('utf-8')
-    ffmpeg_pid = None
-    for line in tasklist_output.split('\n'):
-        if "ffmpeg" in line:
-            ffmpeg_pid = line.split()[1]
-            break
-    if ffmpeg_pid:
-        devnull = open(os.devnull, 'w')
-        #subprocess.Popen(['taskkill', '/F', '/T', '/PID', ffmpeg_pid], stdout=devnull, stderr=devnull, creationflags=subprocess.CREATE_NO_WINDOW)
-        subprocess.Popen(['taskkill', '/F', '/T', '/PID', ffmpeg_pid], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=True, creationflags=subprocess.CREATE_NO_WINDOW)
+    except KeyboardInterrupt:
+        if error_messages_callback:
+            error_messages_callback("Cancelling all tasks")
+        else:
+            print("Cancelling all tasks")
+        return
+
+    except Exception as e:
+        if error_messages_callback:
+            error_messages_callback(e)
+        else:
+            print(e)
+        return
 
 
-def stop_ffmpeg_linux():
-
+def stop_ffmpeg_linux(error_messages_callback=None):
     process_name = 'ffmpeg'
     try:
         output = subprocess.check_output(['ps', '-ef'])
@@ -1514,6 +1594,21 @@ def stop_ffmpeg_linux():
     except IndexError:
         #print(f"{process_name} is not running")
         pass
+
+    except KeyboardInterrupt:
+        if error_messages_callback:
+            error_messages_callback("Cancelling all tasks")
+        else:
+            print("Cancelling all tasks")
+        return
+
+    except Exception as e:
+        if error_messages_callback:
+            error_messages_callback(e)
+        else:
+            print(e)
+        return
+
 
 def stop_record_streaming_windows():
     global main_window, thread_record_streaming
@@ -1663,6 +1758,7 @@ def extract_audio(filename, n_channels=1, rate=16000):
         main_window.write_event_value('-EXCEPTION-', e)
 
     if not_transcribing: return
+
     if sys.platform == "win32":
         subprocess.check_output(command, stdin=open(os.devnull), creationflags=subprocess.CREATE_NO_WINDOW)
     else:
@@ -1698,9 +1794,8 @@ def vosk_transcribe(src, dst, video_filepath, subtitle_format):
         subtitle_filepath, subtitle_file_extension
 
     if not os.path.isfile(video_filepath):
-        FONT_TYPE = "Helvetica"
-        FONT_SIZE = 9
-        sg.set_options(font=(FONT_TYPE, FONT_SIZE))
+        FONT = ("Helvetica", 10)
+        sg.set_options(font=FONT)
         sg.Popup("{} is not exist!".format(video_filepath), title="Info", line_width=50)
         return
 
@@ -1862,7 +1957,7 @@ def vosk_transcribe(src, dst, video_filepath, subtitle_format):
             total = 100
             main_window.write_event_value('-EVENT-TRANSCRIBE-UPDATE-PROGRESS-BAR-', (info, "0%", 0))
 
-            transcript_translator = SentenceTranslator(src=src, dst=dst)
+            transcript_translator = SentenceTranslator(src=src, dst=dst, error_messages_callback=show_error_messages)
             translated_transcriptions = []
 
             for i, translated_transcription in enumerate(pool.imap(transcript_translator, created_subtitles)):
@@ -2085,9 +2180,6 @@ def save_as_declared_subtitle_filename(declared_subtitle_filename, src, dst):
 
     transcribe_is_done_filename = "transcribe_is_done"
     transcribe_is_done_filepath = os.path.join(tempfile.gettempdir(), transcribe_is_done_filename)
-    #transcribe_is_done_file = open(transcribe_is_done_filepath, "r")
-    #transcribe_is_done = transcribe_is_done_file.read()
-    #transcribe_is_done_file.close()
 
     while True:
         if os.path.isfile(transcribe_is_done_filepath):
@@ -2118,9 +2210,8 @@ def save_as_declared_subtitle_filename(declared_subtitle_filename, src, dst):
                     created_subtitles.append(entry[1])
 
             else:
-                FONT_TYPE = "Helvetica"
-                FONT_SIZE = 9
-                sg.set_options(font=(FONT_TYPE, FONT_SIZE))
+                FONT = ("Helvetica", 10)
+                sg.set_options(font=FONT)
                 sg.Popup("Subtitle format you typed is not supported, subtitle file will be saved in TXT format.", title="Info", line_width=50)
                 subtitle_filepath = "{base}.{format}".format(base=subtitle_file_base, format="txt")
                 shutil.copy(tmp_src_txt_transcription_filepath, subtitle_filepath)
@@ -2205,8 +2296,11 @@ def font_length(Text, Font, Size) :
 
 
 def popup_yes_no(text, title=None):
+    FONT = ("Helvetica", 10)
+    sg.set_options(font=FONT)
+
     layout = [
-        [sg.Text(text)],
+        [sg.Text(text, size=(50,1))],
         [sg.Push(), sg.Button('Yes'), sg.Button('No')],
     ]
     return sg.Window(title if title else text, layout, resizable=True).read(close=True)
@@ -2214,9 +2308,8 @@ def popup_yes_no(text, title=None):
 
 def make_progress_bar_window(info, total):
 
-    FONT_TYPE = "Helvetica"
-    FONT_SIZE = 9
-    sg.set_options(font=(FONT_TYPE, FONT_SIZE))
+    FONT = ("Helvetica", 10)
+    sg.set_options(font=FONT)
 
     layout = [
                 [sg.Text(info, key='-INFO-')],
@@ -2230,12 +2323,17 @@ def make_progress_bar_window(info, total):
     return progress_bar_window
 
 
+def show_error_messages(messages):
+    global main_window, not_transcribing
+    not_transcribing = True
+    main_window.write_event_value("-EXCEPTION-", messages)
+
+
 def make_transcribe_window(info, total):
     global not_transcribing
 
-    FONT_TYPE = "Helvetica"
-    FONT_SIZE = 9
-    sg.set_options(font=(FONT_TYPE, FONT_SIZE))
+    FONT = ("Helvetica", 10)
+    sg.set_options(font=FONT)
 
     layout = [
                 [sg.Text("Progress info", key='-INFO-')],
@@ -2244,10 +2342,10 @@ def make_transcribe_window(info, total):
                     sg.Text("0%", size=(5,1), key='-PERCENTAGE-')
                 ],
                 [sg.Multiline(size=(60, 10), expand_x=True, expand_y=True, key='-OUTPUT-MESSAGES-')],
-                [sg.Button('Cancel', font=("Helvetica", 9), expand_x=True, expand_y=True, key='-CANCEL-')]
+                [sg.Button('Cancel', font=FONT, expand_x=True, expand_y=True, key='-CANCEL-')]
              ]
 
-    transcribe_window = sg.Window('Transcribe', layout, font=FONT_TYPE, resizable=True, keep_on_top=True, finalize=True)
+    transcribe_window = sg.Window('Transcribe', layout, font=FONT, resizable=True, keep_on_top=True, finalize=True)
     transcribe_window['-PROGRESS-'].update(max=total)
     move_center(transcribe_window)
 
@@ -2257,39 +2355,14 @@ def make_transcribe_window(info, total):
 def make_overlay_translation_window(translated_text):
     xmax, ymax = sg.Window.get_screen_size()
 
-    '''
-    max_columns = None
-    max_lines = None
-
-    if sys.platform == "win32":
-        SM_CXSCREEN = 0
-        SM_CYSCREEN = 1
-        width = ctypes.windll.user32.GetSystemMetrics(SM_CXSCREEN)
-        height = ctypes.windll.user32.GetSystemMetrics(SM_CYSCREEN)
-
-        max_columns = int(width/8.5)
-        max_lines = int(height/18)
-
-    else:
-        try:
-            output = subprocess.check_output(['xrandr'], check=True)
-            primary_line = [line for line in output.decode().splitlines() if ' connected primary' in line][0]
-            primary_size = primary_line.split()[3].replace("+"," ").split()[0]
-            max_columns, max_lines = int(primary_size.split('x')[0]) // 8, int(primary_size.split('x')[1]) // 18
-
-        except subprocess.CalledProcessError:
-            max_columns = int(os.environ.get('COLUMNS', 80))
-            max_lines = int(os.environ.get('LINES', 24))
-    '''
-
     max_columns = int(os.environ.get('COLUMNS', 80))
     max_lines = int(os.environ.get('LINES', 24))
 
     columns = max_columns
     rows = max_lines
 
-    FONT_TYPE = 'Helvetica'
-    FONT_SIZE = 16
+    FONT = ("Helvetica", 16)
+    sg.set_options(font=FONT)
 
     if len(translated_text)<=96:
         window_width = int(9.9*(xmax/1280)*len(translated_text) + 60)
@@ -2315,7 +2388,8 @@ def make_overlay_translation_window(translated_text):
     if xmax > 1280: FONT_SIZE = 14
     if xmax <= 1280: FONT_SIZE = 16
 
-    sg.set_options(font=(FONT_TYPE, FONT_SIZE))
+    FONT_TYPE = "Helvetica"
+    sg.set_options(font=FONT)
 
     multiline_width = len(translated_text)
     multiline_height = nl
@@ -2364,14 +2438,23 @@ def move_center(window):
     win_width, win_height = window.size
     x, y = (screen_width-win_width)//2, (screen_height-win_height)//2 - 30
     window.move(x, y)
+    window.refresh()
 
 
 def get_clipboard_text():
-    return subprocess.check_output(['xclip', '-selection', 'clipboard', '-out']).decode()
+    try:
+        clipboard_data = subprocess.check_output(['xclip', '-selection', 'clipboard', '-o'], universal_newlines=True)
+        return clipboard_data.strip()
+    except subprocess.CalledProcessError:
+        # Handle the case when clipboard is empty or unsupported
+        return None
 
 
 def set_clipboard_text(text):
-    subprocess.run(['xclip', '-selection', 'clipboard'], input=text.encode())
+    try:
+        subprocess.run(['xclip', '-selection', 'clipboard'], input=text.encode())
+    except subprocess.CalledProcessError as e:
+        pass
 
 
 #------------------------------------------------------------ MAIN PROGRAM ------------------------------------------------------------#
@@ -2385,20 +2468,6 @@ def main():
         transcribe_window, thread_vosk_transcribe, all_transcribe_threads, not_transcribing, \
         saved_src_subtitle_filepath, saved_dst_subtitle_filepath, subtitle_filepath, subtitle_file_extension
 
-    if sys.platform == "win32":
-        user32 = ctypes.windll.user32
-        kernel32 = ctypes.windll.kernel32
-        kernel32.GlobalLock.argtypes = [ctypes.wintypes.HGLOBAL]
-        kernel32.GlobalLock.restype = ctypes.wintypes.LPVOID
-        kernel32.GlobalSize.argtypes = [ctypes.wintypes.HGLOBAL]
-        kernel32.GlobalSize.restype = ctypes.c_size_t
-        user32.OpenClipboard.argtypes = [ctypes.wintypes.HWND]
-        user32.OpenClipboard.restype = ctypes.wintypes.BOOL
-        user32.CloseClipboard.argtypes = []
-        user32.CloseClipboard.restype = ctypes.wintypes.BOOL
-        user32.GetClipboardData.argtypes = [ctypes.wintypes.UINT]
-        user32.GetClipboardData.restype = ctypes.wintypes.HANDLE
-
 
 #------------------------------------------------------------- GUI PARTS -------------------------------------------------------------#
 
@@ -2407,44 +2476,43 @@ def main():
     main_window_height = int(0.5*ymax)
     multiline_width = int(0.15*main_window_width)
     multiline_height = int(0.0125*main_window_height)
-    FONT_TYPE = "Helvetica"
-    FONT_SIZE = 9
-    sg.set_options(font=(FONT_TYPE, FONT_SIZE))
+    FONT = ("Helvetica", 10)
+    sg.set_options(font=FONT)
 
     layout =  [
                 [sg.Frame('Hints',[
                                     [sg.Text('Click \"Start\" button to start listening and printing subtitles on screen.', expand_x=True, expand_y=True)],
                                     [sg.Text('Paste the streaming URL into URL inputbox then check the \"Record Streaming\" checkbox to record the streaming.', expand_x=True, expand_y=True)],
-                                    #[sg.Text('If you record the streaming, when you save transcriptions, all timestamps will be relative to the \"Start\" button clicked time.', expand_x=True, expand_y=True)],
-                                    #[sg.Text('If you don\'t record the streaming, all timestamps will be based on your system clock.', expand_x=True, expand_y=True)],
-                                ], border_width=2, expand_x=True, expand_y=True)],
+                                  ],
+                                  border_width=2, expand_x=True, expand_y=True)
+                ],
                 [
                     sg.Text('URL', size=(12, 1)),
-                    sg.Input(size=(20, 1), expand_x=True, expand_y=True, key='-URL-', enable_events=True, right_click_menu=['&Edit', ['&Paste',]]),
+                    sg.Input(size=(16, 1), expand_x=True, expand_y=True, key='-URL-', enable_events=True, right_click_menu=['&Edit', ['&Copy','&Paste',]]),
                     sg.Checkbox("Record Streaming", key='-RECORD-STREAMING-', enable_events=True)
                 ],
                 [
                     #sg.Text('', size=(3, 1)),
                     sg.Text('Thread status', size=(12, 1)),
-                    sg.Text('NOT RECORDING', size=(24, 1), background_color='green1', text_color='black', expand_x=True, expand_y=True, key='-RECORD-STREAMING-STATUS-'),
+                    sg.Text('NOT RECORDING', size=(20, 1), background_color='green1', text_color='black', expand_x=True, expand_y=True, key='-RECORD-STREAMING-STATUS-'),
                     sg.Text('Duration recorded', size=(16, 1)),
-                    sg.Text('0:00:00.000000', size=(9, 1), background_color='green1', text_color='black', expand_x=True, expand_y=True, key='-STREAMING-DURATION-RECORDED-'),
-                    sg.Text('', size=(12, 1), expand_x=True, expand_y=True)
+                    sg.Text('0:00:00.000000', size=(14, 1), background_color='green1', text_color='black', expand_x=True, expand_y=True, key='-STREAMING-DURATION-RECORDED-'),
+                    sg.Text('', size=(16, 1), expand_x=True, expand_y=True)
                 ],
                 [sg.Text('', expand_x=True, expand_y=True),
                  sg.Button('SAVE RECORDED STREAMING', size=(31,1), expand_x=True, expand_y=True, key='-EVENT-SAVE-RECORDED-STREAMING-'),
                  sg.Text('', expand_x=True, expand_y=True)],
-                [sg.Text('Audio language', size=(12, 1), expand_x=True, expand_y=True),
-                 sg.Combo(list(map_src_of_language), size=(int(0.2*multiline_width), 1), default_value="English", expand_x=True, expand_y=True, key='-SRC-')],
-                [sg.Multiline(size=(multiline_width, multiline_height), expand_x=True, expand_y=True, key='-ML-SRC-RESULTS-')],
-                [sg.Multiline(size=(multiline_width, 0.5*multiline_height), expand_x=True, expand_y=True, key='-ML-SRC-PARTIAL-RESULTS-')],
+                [sg.Text('Audio language', size=(10, 1), expand_x=True, expand_y=True),
+                 sg.Combo(list(map_src_of_language), size=(12, 1), default_value="English", expand_x=True, expand_y=True, key='-SRC-')],
+                [sg.Multiline(size=(96, 5), expand_x=True, expand_y=True, right_click_menu=['&Edit', ['&Copy','&Paste',]], key='-ML-SRC-RESULTS-')],
+                [sg.Multiline(size=(96, 3), expand_x=True, expand_y=True, right_click_menu=['&Edit', ['&Copy','&Paste',]], key='-ML-SRC-PARTIAL-RESULTS-')],
                 [sg.Text('', expand_x=True, expand_y=True),
                  sg.Button('SAVE TRANSCRIPTION', size=(31,1), expand_x=True, expand_y=True, key='-EVENT-SAVE-SRC-TRANSCRIPTION-'),
                  sg.Text('', expand_x=True, expand_y=True)],
-                [sg.Text('Translation language', size=(12, 1),expand_x=True, expand_y=True),
-                 sg.Combo(list(map_dst_of_language), size=(int(0.2*multiline_width), 1), default_value="Indonesian", expand_x=True, expand_y=True, key='-DST-')],
-                [sg.Multiline(size=(multiline_width, multiline_height), expand_x=True, expand_y=True, key='-ML-DST-RESULTS-')],
-                [sg.Multiline(size=(multiline_width, 0.5*multiline_height), expand_x=True, expand_y=True, key='-ML-DST-PARTIAL-RESULTS-')],
+                [sg.Text('Translation language', size=(10, 1),expand_x=True, expand_y=True),
+                 sg.Combo(list(map_dst_of_language), size=(12, 1), default_value="Indonesian", expand_x=True, expand_y=True, key='-DST-')],
+                [sg.Multiline(size=(96, 5), expand_x=True, expand_y=True, right_click_menu=['&Edit', ['&Copy','&Paste',]], key='-ML-DST-RESULTS-')],
+                [sg.Multiline(size=(96, 3), expand_x=True, expand_y=True, right_click_menu=['&Edit', ['&Copy','&Paste',]], key='-ML-DST-PARTIAL-RESULTS-')],
                 [sg.Text('', expand_x=True, expand_y=True, key='-SPACES3-'),
                  sg.Button('SAVE TRANSLATED TRANSCRIPTION', size=(31,1), expand_x=True, expand_y=True, key='-EVENT-SAVE-DST-TRANSCRIPTION-'),
                  sg.Text('', expand_x=True, expand_y=True, key='-SPACES4-')],
@@ -2459,9 +2527,9 @@ def main():
     SetLogLevel(-1)
 
     if sys.platform == "win32":
-        stop_ffmpeg_windows()
+        stop_ffmpeg_windows(error_messages_callback=show_error_messages)
     else:
-        stop_ffmpeg_linux()
+        stop_ffmpeg_linux(error_messages_callback=show_error_messages)
 
     last_selected_src = None
     last_selected_dst = None
@@ -2483,8 +2551,7 @@ def main():
 
     tmp_recorded_streaming_filename = "record.mp4"
     tmp_recorded_streaming_filepath = os.path.join(tempfile.gettempdir(), tmp_recorded_streaming_filename)
-    if os.path.isfile(tmp_recorded_streaming_filepath):
-        os.remove(tmp_recorded_streaming_filepath)
+    if os.path.isfile(tmp_recorded_streaming_filepath): os.remove(tmp_recorded_streaming_filepath)
 
     saved_recorded_streaming_filename = None
 
@@ -2585,7 +2652,7 @@ def main():
     parser.add_argument("-u", "--url", type=str, metavar="URL", help="URL of live streaming if you want to record the streaming")
     parser.add_argument("-vf", "--video-filename", type=str, metavar="VIDEO_FILENAME", help="video file to store recording to", default=None)
 
-    parser.add_argument('-v', '--version', action='version', version='0.1.5')
+    parser.add_argument('-v', '--version', action='version', version=VERSION)
 
     args = parser.parse_args(remaining)
     args = parser.parse_args()
@@ -2637,9 +2704,8 @@ def main():
         dump_fn = None
 
     if args.subtitle_format not in FORMATTERS.keys():
-        FONT_TYPE = "Helvetica"
-        FONT_SIZE = 9
-        sg.set_options(font=(FONT_TYPE, FONT_SIZE))
+        FONT = ("Helvetica", 10)
+        sg.set_options(font=FONT)
         sg.Popup("Subtitle format is not supported, you can choose it later when you save transcriptions.", title="Info", line_width=50)
 
     subtitle_format = args.subtitle_format
@@ -2656,8 +2722,14 @@ def main():
 #------------------------------------ REMAINING GUI PARTS NEEDED TO LOAD AT LAST BEFORE MAIN LOOP ------------------------------------#
 
 
-    main_window = sg.Window('VOSK Live Subtitles', layout, resizable=True, keep_on_top=True, finalize=True)
+    main_window = sg.Window('PyVOSKLiveSubtitles-'+VERSION, layout, resizable=True, keep_on_top=True, finalize=True)
     main_window['-SRC-'].block_focus()
+    main_window.bind("<Button-3>", "right_click")
+    main_window['-URL-'].bind("<FocusIn>", "FocusIn")
+    main_window['-ML-SRC-RESULTS-'].bind("<FocusIn>", "FocusIn")
+    main_window['-ML-SRC-PARTIAL-RESULTS-'].bind("<FocusIn>", "FocusIn")
+    main_window['-ML-DST-RESULTS-'].bind("<FocusIn>", "FocusIn")
+    main_window['-ML-DST-PARTIAL-RESULTS-'].bind("<FocusIn>", "FocusIn")
 
     if (sys.platform == "win32"):
         if main_window.TKroot is not None:
@@ -2672,13 +2744,9 @@ def main():
     overlay_translation_window = None
     move_center(main_window)
 
-    FONT_TYPE = "Helvetica"
-    FONT_SIZE = 9
-    sg.set_options(font=(FONT_TYPE, FONT_SIZE))
+    FONT = ("Helvetica", 10)
+    sg.set_options(font=FONT)
 
-    #transcribe_window = make_transcribe_window("", 100)
-    #move_center(transcribe_window)
-    #transcribe_window.Hide()
     transcribe_window = None
 
     progressbar = make_progress_bar_window("", 100)
@@ -2697,7 +2765,6 @@ def main():
 
     if args.url:
         is_valid_url_streaming = is_streaming_url(args.url)
-        #print("is_valid_url_streaming = {}".format(is_valid_url_streaming))
         if is_valid_url_streaming:
             url = args.url
             main_window['-URL-'].update(url)
@@ -2742,15 +2809,80 @@ def main():
         dst_file.close()
 
 
+        if event == 'right_click':
+
+            x, y = main_window.TKroot.winfo_pointerxy()
+            widget = main_window.TKroot.winfo_containing(x, y)
+            widget.focus_set()
+
+
+        if event == 'Copy':
+
+            key = main_window.find_element_with_focus().Key
+            widget = main_window[key].Widget
+            selected_text = None
+            try:
+                selected_text = widget.selection_get()
+            except:
+                pass
+            if sys.platform == "win32":
+                if selected_text:
+                    win32clipboard.OpenClipboard()
+                    win32clipboard.EmptyClipboard()
+                    win32clipboard.SetClipboardText(selected_text)
+                    win32clipboard.CloseClipboard()
+            elif sys.platform == "linux":
+                if selected_text:
+                    set_clipboard_text(selected_text)
+
+
+        elif event == 'Paste':
+
+            key = main_window.find_element_with_focus().Key
+            current_value = values[key]
+            text_elem = main_window[key]
+            element_type = type(text_elem)
+            strings = str(text_elem.Widget.index('insert'))
+            cursor_position_strings = ""
+            if "Input" in str(element_type):
+                cursor_position_strings = strings
+            elif "Multiline" in str(element_type):
+                cursor_position_strings = strings[2:]
+            cursor_position = int(cursor_position_strings)
+            clipboard_data = None
+            if sys.platform == "win32":
+                try:
+                    win32clipboard.OpenClipboard()
+                    clipboard_data = win32clipboard.GetClipboardData()
+                except Exception as e:
+                    #show_error_messages(e)
+                    pass
+            elif sys.platform == "linux":
+                try:
+                    clipboard_data = get_clipboard_text()
+                except:
+                    pass
+                    
+            if clipboard_data:
+                new_value = current_value[:cursor_position] + clipboard_data + current_value[cursor_position:]
+                main_window[key].update(new_value)
+                cursor_position += len(clipboard_data)
+                if "Multiline" in str(element_type):
+                    text_elem.Widget.mark_set('insert', f'1.{cursor_position}')
+                    text_elem.Widget.see(f'1.{cursor_position}')
+                elif "Input" in str(element_type):
+                    text_elem.Widget.icursor(cursor_position)
+                    text_elem.Widget.xview_moveto(1.0)
+
+
         if event == 'Exit' or event == sg.WIN_CLOSED:
 
             if transcribe_window is not None and window == transcribe_window:
 
                 if not not_transcribing:
-                    FONT_TYPE = "Helvetica"
-                    FONT_SIZE = 9
-                    sg.set_options(font=(FONT_TYPE, FONT_SIZE))
-                    answer = popup_yes_no('             Are you sure?              ', title='Confirm')
+                    FONT = ("Helvetica", 10)
+                    sg.set_options(font=FONT)
+                    answer = popup_yes_no('Are you sure?', title='Confirm')
                     if 'Yes' in answer:
                         not_transcribing = True
                         if thread_vosk_transcribe and thread_vosk_transcribe.is_alive(): stop_thread(thread_vosk_transcribe)
@@ -2799,30 +2931,14 @@ def main():
                     main_window['-URL-'].update(text.strip())
 
 
-        elif event == 'Paste':
-
-            if sys.platform == "win32":
-                user32.OpenClipboard(None)
-                clipboard_data = user32.GetClipboardData(1)  # 1 is CF_TEXT
-                if clipboard_data:
-                    data = ctypes.c_char_p(clipboard_data)
-                    main_window['-URL-'].update(data.value.decode('utf-8'))
-                user32.CloseClipboard()
-            elif sys.platform == "linux":
-                text = get_clipboard_text()
-                if text:
-                    main_window['-URL-'].update(text.strip())
-
-
         elif event == '-RECORD-STREAMING-':
 
             if values['-RECORD-STREAMING-']:
                 is_valid_url_streaming = is_streaming_url(str(values['-URL-']).strip())
                 if not is_valid_url_streaming:
-                    FONT_TYPE = "Helvetica"
-                    FONT_SIZE = 9
-                    sg.set_options(font=(FONT_TYPE, FONT_SIZE))
-                    sg.Popup('Invalid URL, please enter a valid URL.                   ', title="Info", line_width=50)
+                    FONT = ("Helvetica", 10)
+                    sg.set_options(font=FONT)
+                    sg.Popup('Invalid URL, please enter a valid URL', title="Info", line_width=50)
                     main_window['-RECORD-STREAMING-'].update(False)
 
 
@@ -2880,10 +2996,9 @@ def main():
                             thread_record_streaming.start()
 
                     else:
-                        FONT_TYPE = "Helvetica"
-                        FONT_SIZE = 9
-                        sg.set_options(font=(FONT_TYPE, FONT_SIZE))
-                        sg.Popup('Invalid URL, please enter a valid URL.                   ', title="Info", line_width=50)
+                        FONT = ("Helvetica", 10)
+                        sg.set_options(font=FONT)
+                        sg.Popup('Invalid URL, please enter a valid URL', title="Info", line_width=50)
                         recognizing = False
                         main_window['-START-BUTTON-'].update(('Stop','Start')[not recognizing], button_color=(('white', ('red', '#283b5b')[not recognizing])))
                         main_window['-RECORD-STREAMING-'].update(False)
@@ -3012,7 +3127,7 @@ def main():
 
             line = str(values[event]).strip().lower()
             main_window['-ML-SRC-RESULTS-'].update(line + "\n", background_color_for_value='yellow1', append=True, autoscroll=True)
-            translated_line = GoogleTranslate(line, src, dst)
+            translated_line = GoogleTranslate(line, src, dst, error_messages_callback=show_error_messages)
             main_window['-ML-DST-RESULTS-'].update(translated_line + "\n", background_color_for_value='yellow1', append=True, autoscroll=True)
             if overlay_translation_window is not None:
                 overlay_translation_window.UnHide
@@ -3067,9 +3182,8 @@ def main():
             percentage = pb[2]
             progress = pb[3]
 
-            FONT_TYPE = "Helvetica"
-            FONT_SIZE = 9
-            sg.set_options(font=(FONT_TYPE, FONT_SIZE))
+            FONT = ("Helvetica", 10)
+            sg.set_options(font=FONT)
 
             progressbar.UnHide()
 
@@ -3087,17 +3201,16 @@ def main():
 
             if prepare:
 
-                FONT_TYPE = "Helvetica"
-                FONT_SIZE = 9
-                sg.set_options(font=(FONT_TYPE, FONT_SIZE))
+                FONT = ("Helvetica", 10)
+                sg.set_options(font=FONT)
                 #transcribe_window.UnHide()
                 transcribe_window = make_transcribe_window("", 100)
 
                 for element in transcribe_window.element_list():
                     if isinstance(element, sg.Text) or isinstance(element, sg.Multiline):
-                        element.update(font=(FONT_TYPE, FONT_SIZE))
+                        element.update(font=FONT)
                     if isinstance(element, sg.Button):
-                        transcribe_window['-CANCEL-'].Widget.config(font=(FONT_TYPE, FONT_SIZE))
+                        transcribe_window['-CANCEL-'].Widget.config(font=FONT)
 
                 transcribe_window['-OUTPUT-MESSAGES-'].update("")
                 transcribe_window['-INFO-'].update("Progress info")
@@ -3190,22 +3303,21 @@ def main():
 
             if os.path.isfile(tmp_recorded_streaming_filepath):
 
-                saved_recorded_streaming_filename = sg.popup_get_file('', no_window=True, save_as=True, font=(FONT_TYPE, FONT_SIZE), default_path=saved_recorded_streaming_filename, file_types=video_file_types)
+                saved_recorded_streaming_filename = sg.popup_get_file('', no_window=True, save_as=True, font=FONT, default_path=saved_recorded_streaming_filename, file_types=video_file_types)
 
                 if saved_recorded_streaming_filename:
                     shutil.copy(tmp_recorded_streaming_filepath, saved_recorded_streaming_filename)
 
             else:
-                FONT_TYPE = "Helvetica"
-                FONT_SIZE = 9
-                sg.set_options(font=(FONT_TYPE, FONT_SIZE))
-                sg.Popup("No streaming was recorded.                             ", title="Info", line_width=50)
+                FONT = ("Helvetica", 10)
+                sg.set_options(font=FONT)
+                sg.Popup("No streaming was recorded", title="Info", line_width=50)
 
 
         elif event == '-EVENT-SAVE-SRC-TRANSCRIPTION-':
             if os.path.isfile(tmp_src_txt_transcription_filepath):
 
-                saved_src_subtitle_filename = sg.popup_get_file('', no_window=True, save_as=True, font=(FONT_TYPE, FONT_SIZE), file_types=subtitle_file_types)
+                saved_src_subtitle_filename = sg.popup_get_file('', no_window=True, save_as=True, font=FONT, file_types=subtitle_file_types)
 
                 if saved_src_subtitle_filename:
 
@@ -3230,17 +3342,16 @@ def main():
                         tmp_src_txt_transcription_file.close()
 
             else:
-                FONT_TYPE = "Helvetica"
-                FONT_SIZE = 9
-                sg.set_options(font=(FONT_TYPE, FONT_SIZE))
-                sg.Popup("No transcriptions was recorded                             ", title="Info", line_width=50)
+                FONT = ("Helvetica", 10)
+                sg.set_options(font=FONT)
+                sg.Popup("No transcriptions was recorded", title="Info", line_width=50)
 
 
         elif event == '-EVENT-SAVE-DST-TRANSCRIPTION-':
 
             if os.path.isfile(tmp_dst_txt_transcription_filepath):
 
-                saved_dst_subtitle_filename = sg.popup_get_file('', no_window=True, save_as=True, font=(FONT_TYPE, FONT_SIZE), file_types=subtitle_file_types)
+                saved_dst_subtitle_filename = sg.popup_get_file('', no_window=True, save_as=True, font=FONT, file_types=subtitle_file_types)
 
                 if saved_dst_subtitle_filename:
 
@@ -3263,15 +3374,13 @@ def main():
                         saved_dst_subtitle_file.close()
                         tmp_dst_txt_transcription_file.close()
             else:
-                FONT_TYPE = "Helvetica"
-                FONT_SIZE = 9
-                sg.set_options(font=(FONT_TYPE, FONT_SIZE))
-                sg.Popup("No translated transcriptions was recorded                 ", title="Info", line_width=50)
+                FONT = ("Helvetica", 10)
+                sg.set_options(font=FONT)
+                sg.Popup("No translated transcriptions was recorded", title="Info", line_width=50)
 
 
         elif event == '-EXCEPTION-':
             e = str(values[event]).strip()
-            #sg.Popup("File format is not supported", title="Info", line_width=50)
             sg.Popup(e, title="Info", line_width=50)
             if transcribe_window: transcribe_window['-OUTPUT-MESSAGES-'].update("", append=False)
 
@@ -3327,6 +3436,7 @@ def main():
     if os.path.isfile(transcribe_is_done_filepath): os.remove(transcribe_is_done_filepath)
 
     remove_temp_files("wav")
+    remove_temp_files("mp4")
 
     main_window.close()
     sys.exit(0)
