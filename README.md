@@ -59,7 +59,16 @@ THAT "streamlink" MODULE FOLDER MUST BE ON SAME FOLDER WITH "pyvls.pyw" and "myp
 
 DONT FORGET TO PLACE THOSE LIBS FILES FROM VOSK (libgcc_s_seh-1.dll, libstdc++-6.dll, libvosk.dll, & libwinpthread-1.dll if your OS is Windows, libvosk.so if your OS is Linux) INTO SAME FOLDER WITH COMPILED EXE FILE!
 
-I was succesfuly compiled it in Windows 10 with pyinstaller-5.1 and Pyhton-3.10.4, and python-3.8.12 in Debian 9
+ALSO NOTE THAT SINCE VERSION 0.1.2 THIS APP NEED ffmpeg AND ffprobe, you can get it from https://www.ffmpeg.org/
+
+IN DEBIAN BASED LINUX OS YOU CAN INSTALL IT WITH :
+
+```
+sudo apt update
+sudo apt install -y ffmpeg
+```
+
+I was succesfuly compiled this script in Windows 10 with pyinstaller-5.1 and Pyhton-3.10.4, and python-3.8.12 in Debian 9
 
 Another alternative way you can install this script with python by cloning this git (or downloading this git as zip then extract it into 
 a folder), and then just type :
