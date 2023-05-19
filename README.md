@@ -2,9 +2,7 @@
 
 ### PySimpleGUI based DESKTOP APP that can RECOGNIZE any LIVE STREAMING in 21 languages that supported by VOSK then TRANSLATE (using unofficial online Google Translate API) and display it as LIVE CAPTION / LIVE SUBTITLE
 
-
-https://user-images.githubusercontent.com/88623122/221994235-0ee3cfa5-26f7-4e53-881d-cdef06fe3f60.mp4
-
+https://github.com/botbahlul/pyvosklivesubtitle/assets/88623122/d7f4b9ab-d333-475a-a0d6-c70b3f9b8621
 
 The speech recognition part is using vosk python module https://pypi.org/project/vosk/
 ```
