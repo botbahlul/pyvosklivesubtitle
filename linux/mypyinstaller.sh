@@ -1,7 +1,9 @@
 pyinstaller --python=/usr/local/bin/python3.8 \
+--add-data "./libvosk.so:." \
 --add-data "./streamlink/plugins/*:streamlink/plugins" \
 --add-data "./streamlink/*:streamlink" \
 --hidden-import argparse \
+--hidden-import sounddevice \
 --hidden-import=sip --paths=/usr/local/lib/python3.8/site-packages/sipbuild \
 --hidden-import streamlink.plugins.abematv \
 --hidden-import streamlink.plugins.adultswim \
@@ -154,4 +156,7 @@ pyinstaller --python=/usr/local/bin/python3.8 \
 --hidden-import streamlink.plugins.zengatv \
 --hidden-import streamlink.plugins.zhanqi \
 --additional-hooks-dir=./ \
---onefile --windowed pyvls.pyw
+--onefile pyvls.pyw \
+--noconsole \
+--windowed 
+
