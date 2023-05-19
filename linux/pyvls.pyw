@@ -323,9 +323,10 @@ def libvoskdir():
         libvosk = "libvosk.dll"
     elif sys.platform == 'linux':
         libvosk = "libvosk.so"
-    elif sys.platform == 'linux':
+    elif sys.platform == 'darwin':
         libvosk = "libvosk.dyld"
     dlldir = os.path.abspath(os.path.dirname(__file__))
+    print(__file__)
     os.environ["PATH"] = dlldir + os.pathsep + os.environ['PATH']
     for path in os.environ["PATH"].split(os.pathsep):
         path = path.strip('"')
@@ -561,7 +562,7 @@ class BatchRecognizer(object):
 
 #============================================================== APP PARTS ==============================================================#
 
-VERSION = '0.1.6'
+VERSION = '0.1.12'
 
 arraylist_models = []
 arraylist_models.append("ca-es");
@@ -1013,6 +1014,7 @@ def worker_recognize(src, dst):
     absolute_start_time = None
     audio_filename, SampleRate = None, None
     first_regions = None
+    model = None
 
     time_value_filename = "time_value"
     time_value_filepath = os.path.join(tempfile.gettempdir(), time_value_filename)
@@ -2956,7 +2958,6 @@ def main():
                 start_button_click_time = datetime.now()
                 #print("start_button_click_time = {}".format(start_button_click_time))
 
-                #if tmp_recorded_streaming_filepath and os.path.isfile(tmp_recorded_streaming_filepath): os.remove(tmp_recorded_streaming_filepath)
                 if partial_result_filepath and os.path.isfile(partial_result_filepath): os.remove(partial_result_filepath)
                 if time_value_filepath and os.path.isfile(time_value_filepath): os.remove(time_value_filepath)
                 if tmp_src_subtitle_filepath and os.path.isfile(tmp_src_subtitle_filepath): os.remove(tmp_src_subtitle_filepath)
@@ -3045,9 +3046,6 @@ def main():
                 if thread_recognize and thread_recognize.is_alive(): stop_thread(thread_recognize)
                 if thread_timed_translate and thread_timed_translate.is_alive(): stop_thread(thread_timed_translate)
 
-                #if thread_recognize and thread_recognize.is_alive(): thread_recognize.join()
-                #if thread_timed_translate and thread_timed_translate.is_alive(): thread_timed_translate.join()
-
                 # IF RECORD STREAMING
                 if main_window['-URL-'].get() != (None or "") and main_window['-RECORD-STREAMING-'].get() == True:
 
@@ -3129,7 +3127,8 @@ def main():
             main_window['-ML-SRC-RESULTS-'].update(line + "\n", background_color_for_value='yellow1', append=True, autoscroll=True)
             translated_line = GoogleTranslate(line, src, dst, error_messages_callback=show_error_messages)
             main_window['-ML-DST-RESULTS-'].update(translated_line + "\n", background_color_for_value='yellow1', append=True, autoscroll=True)
-            if overlay_translation_window is not None:
+
+            if overlay_translation_window:
                 overlay_translation_window.UnHide
                 overlay_translation_window['-ML-OVERLAY-DST-PARTIAL-RESULTS-'].update(translated_line, background_color_for_value='black', visible=True, autoscroll=True)
             else:
@@ -3144,9 +3143,13 @@ def main():
                 main_window['-ML-DST-PARTIAL-RESULTS-'].update(translated_text,background_color_for_value='yellow1',autoscroll=True)
 
                 # SHOWING OVERLAY TRANSLATION WINDOW
-                if not overlay_translation_window:
+                if overlay_translation_window:
+                    overlay_translation_window.UnHide()
+                    overlay_translation_window['-ML-OVERLAY-DST-PARTIAL-RESULTS-'].update(translated_text,background_color_for_value='black', visible=True, autoscroll=True)
+                else:
                     overlay_translation_window = make_overlay_translation_window(100*' ')
-                overlay_translation_window['-ML-OVERLAY-DST-PARTIAL-RESULTS-'].update(translated_text,background_color_for_value='black', visible=True, autoscroll=True)
+                    overlay_translation_window['-ML-OVERLAY-DST-PARTIAL-RESULTS-'].update(translated_text,background_color_for_value='black', visible=True, autoscroll=True)
+
             else:
                 overlay_translation_window.Hide()
 
@@ -3185,14 +3188,17 @@ def main():
             FONT = ("Helvetica", 10)
             sg.set_options(font=FONT)
 
-            progressbar.UnHide()
+            if progressbar:
+                progressbar.UnHide()
+            else:
+                progressbar = make_progress_bar_window("", 100)
 
             progressbar['-INFO-'].update(info)
             progressbar['-PERCENTAGE-'].update(percentage)
             progressbar['-PROGRESS-'].update(progress)
             if progress == total:
                 time.sleep(1)
-                progressbar.close()
+                progressbar.Hide()
 
 
         elif event == '-EVENT-TRANSCRIBE-PREPARE-WINDOW-':
@@ -3203,7 +3209,6 @@ def main():
 
                 FONT = ("Helvetica", 10)
                 sg.set_options(font=FONT)
-                #transcribe_window.UnHide()
                 transcribe_window = make_transcribe_window("", 100)
 
                 for element in transcribe_window.element_list():
@@ -3216,8 +3221,6 @@ def main():
                 transcribe_window['-INFO-'].update("Progress info")
                 transcribe_window['-PROGRESS-'].update(0)
                 transcribe_window['-PERCENTAGE-'].update("0%")
-                move_center(transcribe_window)
-                transcribe_window.refresh()
 
 
         elif event == '-EVENT-TRANSCRIBE-SEND-MESSAGES-':
