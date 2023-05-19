@@ -1,8 +1,11 @@
 pyinstaller ^
+--add-data ".\libgcc_s_seh-1.dll;." ^
+--add-data ".\libstdc++-6.dll;." ^
+--add-data ".\libvosk.dll;." ^
+--add-data ".\libwinpthread-1.dll;." ^
 --add-data ".\streamlink\plugins\*;streamlink\plugins" ^
 --add-data ".\streamlink\*;streamlink" ^
---hidden-import sip  ^
---hidden-import argparse ^
+--hidden-import pywin32 ^
 --hidden-import streamlink.plugins.abematv ^
 --hidden-import streamlink.plugins.adultswim ^
 --hidden-import streamlink.plugins.afreeca ^
@@ -153,5 +156,6 @@ pyinstaller ^
 --hidden-import streamlink.plugins.zeenews ^
 --hidden-import streamlink.plugins.zengatv ^
 --hidden-import streamlink.plugins.zhanqi ^
---additional-hooks-dir=./ ^
---onefile pyvls.pyw
+--onefile pyvls.pyw ^
+--noconsole ^
+--windowed 

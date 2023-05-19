@@ -326,14 +326,13 @@ def libvoskdir():
     elif sys.platform == 'darwin':
         libvosk = "libvosk.dyld"
     dlldir = os.path.abspath(os.path.dirname(__file__))
-    print(__file__)
     os.environ["PATH"] = dlldir + os.pathsep + os.environ['PATH']
     for path in os.environ["PATH"].split(os.pathsep):
         path = path.strip('"')
         if os.path.isfile(os.path.join(path, libvosk)):
             return path
     raise TypeError('libvosk not found')
-    
+
 
 def open_dll():
     dlldir = libvoskdir()
@@ -562,7 +561,7 @@ class BatchRecognizer(object):
 
 #============================================================== APP PARTS ==============================================================#
 
-VERSION = '0.1.12'
+VERSION = '0.1.13'
 
 arraylist_models = []
 arraylist_models.append("ca-es");
