@@ -38,7 +38,7 @@ def get_lib_files():
         return ['libvosk.dyld']
     elif platform.system() == 'Windows':
         return ['libgcc_s_seh-1.dll', 'libstdc++-6.dll', 'libvosk.dll', 'libwinpthread-1.dll']
-    else:
+    if not (platform.system() == 'Linux' or platform.system() == 'Darwin' or platform.system() == 'Windows'):
         raise NotImplementedError(f"Platform '{platform.system()}' is not supported.")
 
 
@@ -52,6 +52,7 @@ install_requires = [
     "vosk>=0.3.44",
     "pysimplegui>=4.60.1",
     "httpx>=0.13.3",
+    "urllib3>=1.26.0,<3.0",
     "streamlink>=5.3.1",
     "six>=1.16.0",
     "pysrt>=1.1.2",

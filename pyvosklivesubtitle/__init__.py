@@ -21,6 +21,7 @@ import multiprocessing
 import ctypes
 if sys.platform == "win32":
     import win32clipboard
+import streamlink
 from streamlink import Streamlink
 from streamlink.exceptions import NoPluginError, StreamlinkError, StreamError
 import six
@@ -561,7 +562,7 @@ class BatchRecognizer(object):
 
 #============================================================== APP PARTS ==============================================================#
 
-VERSION = '0.1.13'
+VERSION = '0.1.14'
 
 arraylist_models = []
 arraylist_models.append("ca-es");
