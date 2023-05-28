@@ -26,8 +26,9 @@ then you can run it by just type :
 pyvosklivesubtitle
 ```
 
-If you don't have python on your OS you can get compiled version from this release page assets.
+If you don't have python on your OS you can try compiled version from this release page assets.
 
+If it doesn't run well then you need to install python on your Windows system.
 
 When you run this app for the very first time it may takes some times to download vosk language model, you can check those  downloaded models in "/home/username/.cache/vosk" (if you're on Linux) and "C:\\Users\\Username\\.cache\vosk\\" (if you're on Windows).
 
