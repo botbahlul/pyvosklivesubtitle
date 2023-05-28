@@ -561,7 +561,7 @@ class BatchRecognizer(object):
 
 #============================================================== APP PARTS ==============================================================#
 
-VERSION = '0.1.13'
+VERSION = '0.1.14'
 
 arraylist_models = []
 arraylist_models.append("ca-es");
@@ -1836,6 +1836,8 @@ def vosk_transcribe(src, dst, video_filepath, subtitle_format):
 
     regions = []
     transcriptions = []
+    created_regions = []
+    created_subtitles = []
     translated_transcriptions = []
 
     if not_transcribing: return
@@ -1941,8 +1943,6 @@ def vosk_transcribe(src, dst, video_filepath, subtitle_format):
 
             if not_transcribing: return
 
-            created_regions = []
-            created_subtitles = []
             for entry in timed_subtitles:
                 created_regions.append(entry[0])
                 created_subtitles.append(entry[1])
@@ -3296,89 +3296,105 @@ def main():
 
         elif event == '-EVENT-SAVE-RECORDED-STREAMING-':
 
-            if not args.video_filename:
-                tmp_recorded_streaming_filename = "record.mp4"
+            if not recognizing:
+
+                if not args.video_filename:
+                    tmp_recorded_streaming_filename = "record.mp4"
+                else:
+                    tmp_recorded_streaming_filename = args.video_filename
+
+                tmp_recorded_streaming_filepath = os.path.join(tempfile.gettempdir(), tmp_recorded_streaming_filename)
+
+                if os.path.isfile(tmp_recorded_streaming_filepath):
+
+                    saved_recorded_streaming_filename = sg.popup_get_file('', no_window=True, save_as=True, font=FONT, default_path=saved_recorded_streaming_filename, file_types=video_file_types)
+
+                    if saved_recorded_streaming_filename:
+                        shutil.copy(tmp_recorded_streaming_filepath, saved_recorded_streaming_filename)
+
+                else:
+                    FONT = ("Helvetica", 10)
+                    sg.set_options(font=FONT)
+                    sg.Popup("No streaming was recorded", title="Info", line_width=50)
+
             else:
-                tmp_recorded_streaming_filename = args.video_filename
-
-            tmp_recorded_streaming_filepath = os.path.join(tempfile.gettempdir(), tmp_recorded_streaming_filename)
-
-            if os.path.isfile(tmp_recorded_streaming_filepath):
-
-                saved_recorded_streaming_filename = sg.popup_get_file('', no_window=True, save_as=True, font=FONT, default_path=saved_recorded_streaming_filename, file_types=video_file_types)
-
-                if saved_recorded_streaming_filename:
-                    shutil.copy(tmp_recorded_streaming_filepath, saved_recorded_streaming_filename)
-
-            else:
-                FONT = ("Helvetica", 10)
-                sg.set_options(font=FONT)
-                sg.Popup("No streaming was recorded", title="Info", line_width=50)
+                pass
 
 
         elif event == '-EVENT-SAVE-SRC-TRANSCRIPTION-':
-            if os.path.isfile(tmp_src_txt_transcription_filepath):
 
-                saved_src_subtitle_filename = sg.popup_get_file('', no_window=True, save_as=True, font=FONT, file_types=subtitle_file_types)
+            if not recognizing:
 
-                if saved_src_subtitle_filename:
+                if os.path.isfile(tmp_src_txt_transcription_filepath):
 
-                    selected_subtitle_format = saved_src_subtitle_filename.split('.')[-1]
+                    saved_src_subtitle_filename = sg.popup_get_file('', no_window=True, save_as=True, font=FONT, file_types=subtitle_file_types)
 
-                    if selected_subtitle_format in FORMATTERS.keys():
-                        timed_subtitles = [(r, t) for r, t in zip(regions, transcriptions) if t]
-                        subtitle_format = selected_subtitle_format
-                        formatter = FORMATTERS.get(subtitle_format)
-                        formatted_subtitles = formatter(timed_subtitles)
-                        tmp_src_subtitle_filename = saved_src_subtitle_filename
-                        subtitle_file = open(tmp_src_subtitle_filename, 'wb')
-                        subtitle_file.write(formatted_subtitles.encode("utf-8"))
-                        subtitle_file.close()
-                    else:
-                        saved_src_subtitle_file = open(saved_src_subtitle_filename, "w")
-                        tmp_src_txt_transcription_file = open(tmp_src_txt_transcription_filepath, "r")
-                        for line in tmp_src_txt_transcription_file:
-                            if line:
-                                saved_src_subtitle_file.write(line)
-                        saved_src_subtitle_file.close()
-                        tmp_src_txt_transcription_file.close()
+                    if saved_src_subtitle_filename:
+
+                        selected_subtitle_format = saved_src_subtitle_filename.split('.')[-1]
+
+                        if selected_subtitle_format in FORMATTERS.keys():
+                            timed_subtitles = [(r, t) for r, t in zip(regions, transcriptions) if t]
+                            subtitle_format = selected_subtitle_format
+                            formatter = FORMATTERS.get(subtitle_format)
+                            formatted_subtitles = formatter(timed_subtitles)
+                            tmp_src_subtitle_filename = saved_src_subtitle_filename
+                            subtitle_file = open(tmp_src_subtitle_filename, 'wb')
+                            subtitle_file.write(formatted_subtitles.encode("utf-8"))
+                            subtitle_file.close()
+                        else:
+                            saved_src_subtitle_file = open(saved_src_subtitle_filename, "w")
+                            tmp_src_txt_transcription_file = open(tmp_src_txt_transcription_filepath, "r")
+                            for line in tmp_src_txt_transcription_file:
+                                if line:
+                                    saved_src_subtitle_file.write(line)
+                            saved_src_subtitle_file.close()
+                            tmp_src_txt_transcription_file.close()
+
+                else:
+                    FONT = ("Helvetica", 10)
+                    sg.set_options(font=FONT)
+                    sg.Popup("No transcriptions was recorded", title="Info", line_width=50)
 
             else:
-                FONT = ("Helvetica", 10)
-                sg.set_options(font=FONT)
-                sg.Popup("No transcriptions was recorded", title="Info", line_width=50)
+                pass
 
 
         elif event == '-EVENT-SAVE-DST-TRANSCRIPTION-':
 
-            if os.path.isfile(tmp_dst_txt_transcription_filepath):
+            if not recognizing:
 
-                saved_dst_subtitle_filename = sg.popup_get_file('', no_window=True, save_as=True, font=FONT, file_types=subtitle_file_types)
+                if os.path.isfile(tmp_dst_txt_transcription_filepath):
 
-                if saved_dst_subtitle_filename:
+                    saved_dst_subtitle_filename = sg.popup_get_file('', no_window=True, save_as=True, font=FONT, file_types=subtitle_file_types)
 
-                    selected_subtitle_format = saved_dst_subtitle_filename.split('.')[-1]
+                    if saved_dst_subtitle_filename:
 
-                    if selected_subtitle_format in FORMATTERS.keys():
-                        timed_translated_subtitles = [(r, t) for r, t in zip(created_regions, translated_transcriptions) if t]
-                        subtitle_format = selected_subtitle_format
-                        formatter = FORMATTERS.get(subtitle_format)
-                        formatted_translated_subtitles = formatter(timed_translated_subtitles)
-                        saved_dst_subtitle_file = open(saved_dst_subtitle_filename, 'wb')
-                        saved_dst_subtitle_file.write(formatted_translated_subtitles.encode("utf-8"))
-                        saved_dst_subtitle_file.close()
-                    else:
-                        saved_dst_subtitle_file = open(saved_dst_subtitle_filename, "w")
-                        tmp_dst_txt_transcription_file = open(tmp_dst_txt_transcription_filepath, "r")
-                        for line in tmp_dst_txt_transcription_file:
-                            if line:
-                                saved_dst_subtitle_file.write(line)
-                        saved_dst_subtitle_file.close()
-                        tmp_dst_txt_transcription_file.close()
+                        selected_subtitle_format = saved_dst_subtitle_filename.split('.')[-1]
+
+                        if selected_subtitle_format in FORMATTERS.keys():
+                            timed_translated_subtitles = [(r, t) for r, t in zip(created_regions, translated_transcriptions) if t]
+                            subtitle_format = selected_subtitle_format
+                            formatter = FORMATTERS.get(subtitle_format)
+                            formatted_translated_subtitles = formatter(timed_translated_subtitles)
+                            saved_dst_subtitle_file = open(saved_dst_subtitle_filename, 'wb')
+                            saved_dst_subtitle_file.write(formatted_translated_subtitles.encode("utf-8"))
+                            saved_dst_subtitle_file.close()
+                        else:
+                            saved_dst_subtitle_file = open(saved_dst_subtitle_filename, "w")
+                            tmp_dst_txt_transcription_file = open(tmp_dst_txt_transcription_filepath, "r")
+                            for line in tmp_dst_txt_transcription_file:
+                                if line:
+                                    saved_dst_subtitle_file.write(line)
+                            saved_dst_subtitle_file.close()
+                            tmp_dst_txt_transcription_file.close()
+                else:
+                    FONT = ("Helvetica", 10)
+                    sg.set_options(font=FONT)
+                    sg.Popup("No translated transcriptions was recorded", title="Info", line_width=50)
+
             else:
-                FONT = ("Helvetica", 10)
-                sg.set_options(font=FONT)
-                sg.Popup("No translated transcriptions was recorded", title="Info", line_width=50)
+                pass
 
 
         elif event == '-EXCEPTION-':
