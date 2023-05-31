@@ -131,4 +131,4 @@ Those command line switches are just to make this application directly select th
 
 MIT
 
-Check my other SPEECH RECOGNITIION + TRANSLATE PROJECTS in https://botbahlul.github.io
+Check my other SPEECH RECOGNITIION + TRANSLATE PROJECTS https://github.com/botbahlul?tab=repositories
