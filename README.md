@@ -86,7 +86,8 @@ For best recognizing performance, on windows you will need STEREO MIX or VIRTUAL
 
 LAUNCH Audio Repeater MME, NOT Audio Repeater KS! AND THEN CLICK THAT START BUTTON AND MINIMIZE IT, DON'T CLOSE IT!
 
-![image](https://user-images.githubusercontent.com/88623122/199528861-22541706-3bdf-427c-8c2f-44174b114e34.png)
+![image](https://github.com/botbahlul/pyvosklivesubtitle/assets/88623122/6b09c622-7a76-42af-a776-738468466025)
+
 
 and on linux you willl need PAVUCONTROL (by choosing MONITOR of your audio device as INPUT DEVICE)
 ![image](https://user-images.githubusercontent.com/88623122/231320153-e89bb21e-916f-4e82-a520-43e3112f6801.png)
