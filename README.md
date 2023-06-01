@@ -97,7 +97,7 @@ and on linux you willl need PAVUCONTROL (by choosing MONITOR of your audio devic
 To DRAG/MOVE that TRANSLATION TEXT anywhere on the screen, just USE CONTROL KEY + LEFT MOUSE combination.
 
 
-ANOTHER NOTES, DON'T FORGET TO CHANGE YOUR CONSOLE (COMMAND PROMPT WINDOW) CODE PAGE TO 65001!
+ANOTHER NOTES, DON'T FORGET TO CHANGE YOUR CONSOLE (COMMAND PROMPT WINDOW) CODE PAGE TO 65001 (UTF-8)!
 
 ```
 To change the codepage for the console, do the following:
