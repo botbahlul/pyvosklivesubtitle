@@ -80,6 +80,7 @@ python setup.py install
 If you fail when installing any python modules using pip, you can always use this way, get that module from github then build them manually
 
 For best recognizing performance, on windows you will need STEREO MIX or VIRTUAL AUDIO CABLE as RECORDING/INPUT DEVICE 
+![image](https://github.com/botbahlul/pyvosklivesubtitle/assets/88623122/e08b4b85-45cb-477b-a7f8-297d94791839)
 ![image](https://user-images.githubusercontent.com/88623122/199527559-e2609d8c-3479-420d-8c52-806fa56a21f4.png)
 ![image](https://user-images.githubusercontent.com/88623122/199528286-1ab77dc4-38a9-41f2-9b92-25db352a1ed2.png)
 ![image](https://user-images.githubusercontent.com/88623122/199528861-22541706-3bdf-427c-8c2f-44174b114e34.png)
