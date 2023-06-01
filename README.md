@@ -89,9 +89,11 @@ and on linux you willl need PAVUCONTROL (by choosing MONITOR of your audio devic
 ![image](https://user-images.githubusercontent.com/88623122/231320153-e89bb21e-916f-4e82-a520-43e3112f6801.png)
 ![image](https://user-images.githubusercontent.com/88623122/230965838-40764e2a-8ce9-4a03-9f8b-901c9eae43ef.png)
 
+
 To DRAG/MOVE that TRANSLATION TEXT anywhere on the screen, just USE CONTROL KEY + LEFT MOUSE combination.
 
-DON'T FORGET TO CHANGE YOUR CONSOLE (COMMAND PROMPT WINDOW) CODE PAGE TO 65001!
+
+ANOTHER NOTES, DON'T FORGET TO CHANGE YOUR CONSOLE (COMMAND PROMPT WINDOW) CODE PAGE TO 65001!
 
 ```
 To change the codepage for the console, do the following:
@@ -101,6 +103,8 @@ Go to [HKEY_LOCAL_MACHINE\Software\Microsoft\Command Processor\Autorun]
 Change the value to @chcp 65001>nul
 If Autorun is not present, you can add a New String
 ```
+![image](https://github.com/botbahlul/pyvosklivesubtitle/assets/88623122/f0a97679-d01a-4e55-b5cd-90530c4026cd)
+
 
 ### Usage
 
