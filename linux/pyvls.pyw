@@ -9,6 +9,7 @@ import json
 import httpx
 import PySimpleGUI as sg
 import tkinter as tk
+
 try:
     import queue  # Python 3 import
 except ImportError:
@@ -32,273 +33,14 @@ import wave
 import audioop
 import math
 
+VERSION = '0.2.0'
 
-#======================================================== ffmpeg_progress_yield ========================================================#
-
-
-#import re
-#import subprocess
-from typing import Any, Callable, Iterator, List, Optional, Union
-
-
-def to_ms(**kwargs: Union[float, int, str]) -> int:
-    hour = int(kwargs.get("hour", 0))
-    minute = int(kwargs.get("min", 0))
-    sec = int(kwargs.get("sec", 0))
-    ms = int(kwargs.get("ms", 0))
-
-    return (hour * 60 * 60 * 1000) + (minute * 60 * 1000) + (sec * 1000) + ms
-
-
-def _probe_duration(cmd: List[str]) -> Optional[int]:
-    """
-    Get the duration via ffprobe from input media file
-    in case ffmpeg was run with loglevel=error.
-
-    Args:
-        cmd (List[str]): A list of command line elements, e.g. ["ffmpeg", "-i", ...]
-
-    Returns:
-        Optional[int]: The duration in milliseconds.
-    """
-
-    def _get_file_name(cmd: List[str]) -> Optional[str]:
-        try:
-            idx = cmd.index("-i")
-            return cmd[idx + 1]
-        except ValueError:
-            return None
-
-    file_name = _get_file_name(cmd)
-    if file_name is None:
-        return None
-
-    try:
-        if sys.platform == "win32":
-            output = subprocess.check_output(
-                [
-                    "ffprobe",
-                    "-loglevel",
-                    "-1",
-                    "-hide_banner",
-                    "-show_entries",
-                    "format=duration",
-                    "-of",
-                    "default=noprint_wrappers=1:nokey=1",
-                    file_name,
-                ],
-                universal_newlines=True,
-                creationflags=subprocess.CREATE_NO_WINDOW,
-            )
-        else:
-            output = subprocess.check_output(
-                [
-                    "ffprobe",
-                    "-loglevel",
-                    "-1",
-                    "-hide_banner",
-                    "-show_entries",
-                    "format=duration",
-                    "-of",
-                    "default=noprint_wrappers=1:nokey=1",
-                    file_name,
-                ],
-                universal_newlines=True,
-            )
-
-        return int(float(output.strip()) * 1000)
-    except Exception:
-        # TODO: add logging
-        return None
-
-
-def _uses_error_loglevel(cmd: List[str]) -> bool:
-    try:
-        idx = cmd.index("-loglevel")
-        if cmd[idx + 1] == "error":
-            return True
-        else:
-            return False
-    except ValueError:
-        return False
-
-
-class FfmpegProgress:
-    DUR_REGEX = re.compile(
-        r"Duration: (?P<hour>\d{2}):(?P<min>\d{2}):(?P<sec>\d{2})\.(?P<ms>\d{2})"
-    )
-    TIME_REGEX = re.compile(
-        r"out_time=(?P<hour>\d{2}):(?P<min>\d{2}):(?P<sec>\d{2})\.(?P<ms>\d{2})"
-    )
-
-    def __init__(self, cmd: List[str], dry_run: bool = False) -> None:
-        """Initialize the FfmpegProgress class.
-
-        Args:
-            cmd (List[str]): A list of command line elements, e.g. ["ffmpeg", "-i", ...]
-            dry_run (bool, optional): Only show what would be done. Defaults to False.
-        """
-        self.cmd = cmd
-        self.stderr: Union[str, None] = None
-        self.dry_run = dry_run
-        self.process: Any = None
-        self.stderr_callback: Union[Callable[[str], None], None] = None
-        if sys.platform == "win32":
-            self.base_popen_kwargs = {
-                "stdin": subprocess.PIPE,  # Apply stdin isolation by creating separate pipe.
-                "stdout": subprocess.PIPE,
-                "stderr": subprocess.STDOUT,
-                "universal_newlines": False,
-                "shell": True,
-            }
-        else:
-            self.base_popen_kwargs = {
-                "stdin": subprocess.PIPE,  # Apply stdin isolation by creating separate pipe.
-                "stdout": subprocess.PIPE,
-                "stderr": subprocess.STDOUT,
-                "universal_newlines": False,
-            }
-
-    def set_stderr_callback(self, callback: Callable[[str], None]) -> None:
-        """
-        Set a callback function to be called on stderr output.
-        The callback function must accept a single string argument.
-        Note that this is called on every line of stderr output, so it can be called a lot.
-        Also note that stdout/stderr are joined into one stream, so you might get stdout output in the callback.
-
-        Args:
-            callback (Callable[[str], None]): A callback function that accepts a single string argument.
-        """
-        if not callable(callback) or len(callback.__code__.co_varnames) != 1:
-            raise ValueError(
-                "Callback must be a function that accepts only one argument"
-            )
-
-        self.stderr_callback = callback
-
-    def run_command_with_progress(
-        self, popen_kwargs=None, duration_override: Union[float, None] = None
-    ) -> Iterator[int]:
-        """
-        Run an ffmpeg command, trying to capture the process output and calculate
-        the duration / progress.
-        Yields the progress in percent.
-
-        Args:
-            popen_kwargs (dict, optional): A dict to specify extra arguments to the popen call, e.g. { creationflags: CREATE_NO_WINDOW }
-            duration_override (float, optional): The duration in seconds. If not specified, it will be calculated from the ffmpeg output.
-
-        Raises:
-            RuntimeError: If the command fails, an exception is raised.
-
-        Yields:
-            Iterator[int]: A generator that yields the progress in percent.
-        """
-        if self.dry_run:
-            return self.cmd
-
-        total_dur: Union[None, int] = None
-        if _uses_error_loglevel(self.cmd):
-            total_dur = _probe_duration(self.cmd)
-
-        cmd_with_progress = (
-            [self.cmd[0]] + ["-progress", "-", "-nostats"] + self.cmd[1:]
-        )
-
-        stderr = []
-        base_popen_kwargs = self.base_popen_kwargs.copy()
-        if popen_kwargs is not None:
-            base_popen_kwargs.update(popen_kwargs)
-
-        if sys.platform == "wind32":
-            self.process = subprocess.Popen(
-                cmd_with_progress,
-                **base_popen_kwargs,
-                creationflags=subprocess.CREATE_NO_WINDOW,
-            )  # type: ignore
-        else:
-            self.process = subprocess.Popen(
-                cmd_with_progress,
-                **base_popen_kwargs,
-            )  # type: ignore
-
-        yield 0
-
-        while True:
-            if self.process.stdout is None:
-                continue
-
-            stderr_line = (
-                self.process.stdout.readline().decode("utf-8", errors="replace").strip()
-            )
-
-            if self.stderr_callback:
-                self.stderr_callback(stderr_line)
-
-            if stderr_line == "" and self.process.poll() is not None:
-                break
-
-            stderr.append(stderr_line.strip())
-
-            self.stderr = "\n".join(stderr)
-
-            if total_dur is None:
-                total_dur_match = self.DUR_REGEX.search(stderr_line)
-                if total_dur_match:
-                    total_dur = to_ms(**total_dur_match.groupdict())
-                    continue
-                elif duration_override is not None:
-                    # use the override (should apply in the first loop)
-                    total_dur = int(duration_override * 1000)
-                    continue
-
-            if total_dur:
-                progress_time = FfmpegProgress.TIME_REGEX.search(stderr_line)
-                if progress_time:
-                    elapsed_time = to_ms(**progress_time.groupdict())
-                    yield int(elapsed_time * 100/ total_dur)
-
-        if self.process is None or self.process.returncode != 0:
-            #print(self.process)
-            #print(self.process.returncode)
-            _pretty_stderr = "\n".join(stderr)
-            raise RuntimeError(f"Error running command {self.cmd}: {_pretty_stderr}")
-
-        yield 100
-        self.process = None
-
-    def quit_gracefully(self) -> None:
-        """
-        Quit the ffmpeg process by sending 'q'
-
-        Raises:
-            RuntimeError: If no process is found.
-        """
-        if self.process is None:
-            raise RuntimeError("No process found. Did you run the command?")
-
-        self.process.communicate(input=b"q")
-        self.process.kill()
-        self.process = None
-
-    def quit(self) -> None:
-        """
-        Quit the ffmpeg process by sending SIGKILL.
-
-        Raises:
-            RuntimeError: If no process is found.
-        """
-        if self.process is None:
-            raise RuntimeError("No process found. Did you run the command?")
-
-        self.process.kill()
-        self.process = None
-
-#=======================================================================================================================================#
 
 #============================================================== VOSK PART ==============================================================#
 
+
 import requests
+from urllib.request import urlretrieve
 from zipfile import ZipFile
 from re import match
 from pathlib import Path
@@ -557,355 +299,11 @@ class BatchRecognizer(object):
     def GetPendingChunks(self):
         return _c.vosk_batch_recognizer_get_pending_chunks(self._handle)
 
+
 #=======================================================================================================================================#
 
 #============================================================== APP PARTS ==============================================================#
 
-VERSION = '0.1.14'
-
-arraylist_models = []
-arraylist_models.append("ca-es");
-arraylist_models.append("zh-cn")
-arraylist_models.append("cs-cz");
-arraylist_models.append("nl-nl");
-arraylist_models.append("en-us")
-arraylist_models.append("eo-eo");
-arraylist_models.append("fr-fr");
-arraylist_models.append("de-de");
-arraylist_models.append("hi-in");
-arraylist_models.append("it-it");
-arraylist_models.append("ja-jp");
-arraylist_models.append("kk-kz");
-arraylist_models.append("fa-ir");
-arraylist_models.append("pl-pl");
-arraylist_models.append("pt-pt");
-arraylist_models.append("ru-ru");
-arraylist_models.append("es-es");
-arraylist_models.append("sv-se");
-arraylist_models.append("tr-tr");
-arraylist_models.append("uk-ua");
-arraylist_models.append("vi-vn");
-
-arraylist_src = []
-arraylist_src.append("ca")
-arraylist_src.append("zh")
-arraylist_src.append("cs")
-arraylist_src.append("nl")
-arraylist_src.append("en")
-arraylist_src.append("eo")
-arraylist_src.append("fr")
-arraylist_src.append("de")
-arraylist_src.append("hi")
-arraylist_src.append("it")
-arraylist_src.append("ja")
-arraylist_src.append("kk")
-arraylist_src.append("fa")
-arraylist_src.append("pl")
-arraylist_src.append("pt")
-arraylist_src.append("ru")
-arraylist_src.append("es")
-arraylist_src.append("sv")
-arraylist_src.append("tr")
-arraylist_src.append("uk")
-arraylist_src.append("vi")
-
-arraylist_src_languages = []
-arraylist_src_languages.append("Catalan")
-arraylist_src_languages.append("Chinese")
-arraylist_src_languages.append("Czech")
-arraylist_src_languages.append("Dutch")
-arraylist_src_languages.append("English")
-arraylist_src_languages.append("Esperanto")
-arraylist_src_languages.append("French")
-arraylist_src_languages.append("German")
-arraylist_src_languages.append("Hindi")
-arraylist_src_languages.append("Italian")
-arraylist_src_languages.append("Japanese")
-arraylist_src_languages.append("Kazakh")
-arraylist_src_languages.append("Persian")
-arraylist_src_languages.append("Polish")
-arraylist_src_languages.append("Portuguese")
-arraylist_src_languages.append("Russian")
-arraylist_src_languages.append("Spanish")
-arraylist_src_languages.append("Swedish")
-arraylist_src_languages.append("Turkish")
-arraylist_src_languages.append("Ukrainian")
-arraylist_src_languages.append("Vietnamese")
-
-map_model_language = dict(zip(arraylist_src_languages, arraylist_models))
-map_src_of_language = dict(zip(arraylist_src_languages, arraylist_src))
-map_language_of_src = dict(zip(arraylist_src, arraylist_src_languages))
-
-arraylist_dst = []
-arraylist_dst.append("af")
-arraylist_dst.append("sq")
-arraylist_dst.append("am")
-arraylist_dst.append("ar")
-arraylist_dst.append("hy")
-arraylist_dst.append("as")
-arraylist_dst.append("ay")
-arraylist_dst.append("az")
-arraylist_dst.append("bm")
-arraylist_dst.append("eu")
-arraylist_dst.append("be")
-arraylist_dst.append("bn")
-arraylist_dst.append("bho")
-arraylist_dst.append("bs")
-arraylist_dst.append("bg")
-arraylist_dst.append("ca")
-arraylist_dst.append("ceb")
-arraylist_dst.append("ny")
-arraylist_dst.append("zh-CN")
-arraylist_dst.append("zh-TW")
-arraylist_dst.append("co")
-arraylist_dst.append("hr")
-arraylist_dst.append("cs")
-arraylist_dst.append("da")
-arraylist_dst.append("dv")
-arraylist_dst.append("doi")
-arraylist_dst.append("nl")
-arraylist_dst.append("en")
-arraylist_dst.append("eo")
-arraylist_dst.append("et")
-arraylist_dst.append("ee")
-arraylist_dst.append("fil")
-arraylist_dst.append("fi")
-arraylist_dst.append("fr")
-arraylist_dst.append("fy")
-arraylist_dst.append("gl")
-arraylist_dst.append("ka")
-arraylist_dst.append("de")
-arraylist_dst.append("el")
-arraylist_dst.append("gn")
-arraylist_dst.append("gu")
-arraylist_dst.append("ht")
-arraylist_dst.append("ha")
-arraylist_dst.append("haw")
-arraylist_dst.append("he")
-arraylist_dst.append("hi")
-arraylist_dst.append("hmn")
-arraylist_dst.append("hu")
-arraylist_dst.append("is")
-arraylist_dst.append("ig")
-arraylist_dst.append("ilo")
-arraylist_dst.append("id")
-arraylist_dst.append("ga")
-arraylist_dst.append("it")
-arraylist_dst.append("ja")
-arraylist_dst.append("jv")
-arraylist_dst.append("kn")
-arraylist_dst.append("kk")
-arraylist_dst.append("km")
-arraylist_dst.append("rw")
-arraylist_dst.append("gom")
-arraylist_dst.append("ko")
-arraylist_dst.append("kri")
-arraylist_dst.append("kmr")
-arraylist_dst.append("ckb")
-arraylist_dst.append("ky")
-arraylist_dst.append("lo")
-arraylist_dst.append("la")
-arraylist_dst.append("lv")
-arraylist_dst.append("ln")
-arraylist_dst.append("lt")
-arraylist_dst.append("lg")
-arraylist_dst.append("lb")
-arraylist_dst.append("mk")
-arraylist_dst.append("mg")
-arraylist_dst.append("ms")
-arraylist_dst.append("ml")
-arraylist_dst.append("mt")
-arraylist_dst.append("mi")
-arraylist_dst.append("mr")
-arraylist_dst.append("mni-Mtei")
-arraylist_dst.append("lus")
-arraylist_dst.append("mn")
-arraylist_dst.append("my")
-arraylist_dst.append("ne")
-arraylist_dst.append("no")
-arraylist_dst.append("or")
-arraylist_dst.append("om")
-arraylist_dst.append("ps")
-arraylist_dst.append("fa")
-arraylist_dst.append("pl")
-arraylist_dst.append("pt")
-arraylist_dst.append("pa")
-arraylist_dst.append("qu")
-arraylist_dst.append("ro")
-arraylist_dst.append("ru")
-arraylist_dst.append("sm")
-arraylist_dst.append("sa")
-arraylist_dst.append("gd")
-arraylist_dst.append("nso")
-arraylist_dst.append("sr")
-arraylist_dst.append("st")
-arraylist_dst.append("sn")
-arraylist_dst.append("sd")
-arraylist_dst.append("si")
-arraylist_dst.append("sk")
-arraylist_dst.append("sl")
-arraylist_dst.append("so")
-arraylist_dst.append("es")
-arraylist_dst.append("su")
-arraylist_dst.append("sw")
-arraylist_dst.append("sv")
-arraylist_dst.append("tg")
-arraylist_dst.append("ta")
-arraylist_dst.append("tt")
-arraylist_dst.append("te")
-arraylist_dst.append("th")
-arraylist_dst.append("ti")
-arraylist_dst.append("ts")
-arraylist_dst.append("tr")
-arraylist_dst.append("tk")
-arraylist_dst.append("tw")
-arraylist_dst.append("uk")
-arraylist_dst.append("ur")
-arraylist_dst.append("ug")
-arraylist_dst.append("uz")
-arraylist_dst.append("vi")
-arraylist_dst.append("cy")
-arraylist_dst.append("xh")
-arraylist_dst.append("yi")
-arraylist_dst.append("yo")
-arraylist_dst.append("zu")
-
-arraylist_dst_languages = []
-arraylist_dst_languages.append("Afrikaans");
-arraylist_dst_languages.append("Albanian");
-arraylist_dst_languages.append("Amharic");
-arraylist_dst_languages.append("Arabic");
-arraylist_dst_languages.append("Armenian");
-arraylist_dst_languages.append("Assamese");
-arraylist_dst_languages.append("Aymara");
-arraylist_dst_languages.append("Azerbaijani");
-arraylist_dst_languages.append("Bambara");
-arraylist_dst_languages.append("Basque");
-arraylist_dst_languages.append("Belarusian");
-arraylist_dst_languages.append("Bengali");
-arraylist_dst_languages.append("Bhojpuri");
-arraylist_dst_languages.append("Bosnian");
-arraylist_dst_languages.append("Bulgarian");
-arraylist_dst_languages.append("Catalan");
-arraylist_dst_languages.append("Cebuano");
-arraylist_dst_languages.append("Chichewa");
-arraylist_dst_languages.append("Chinese (Simplified)");
-arraylist_dst_languages.append("Chinese (Traditional)");
-arraylist_dst_languages.append("Corsican");
-arraylist_dst_languages.append("Croatian");
-arraylist_dst_languages.append("Czech");
-arraylist_dst_languages.append("Danish");
-arraylist_dst_languages.append("Dhivehi");
-arraylist_dst_languages.append("Dogri");
-arraylist_dst_languages.append("Dutch");
-arraylist_dst_languages.append("English");
-arraylist_dst_languages.append("Esperanto");
-arraylist_dst_languages.append("Estonian");
-arraylist_dst_languages.append("Ewe");
-arraylist_dst_languages.append("Filipino");
-arraylist_dst_languages.append("Finnish");
-arraylist_dst_languages.append("French");
-arraylist_dst_languages.append("Frisian");
-arraylist_dst_languages.append("Galician");
-arraylist_dst_languages.append("Georgian");
-arraylist_dst_languages.append("German");
-arraylist_dst_languages.append("Greek");
-arraylist_dst_languages.append("Guarani");
-arraylist_dst_languages.append("Gujarati");
-arraylist_dst_languages.append("Haitian Creole");
-arraylist_dst_languages.append("Hausa");
-arraylist_dst_languages.append("Hawaiian");
-arraylist_dst_languages.append("Hebrew");
-arraylist_dst_languages.append("Hindi");
-arraylist_dst_languages.append("Hmong");
-arraylist_dst_languages.append("Hungarian");
-arraylist_dst_languages.append("Icelandic");
-arraylist_dst_languages.append("Igbo");
-arraylist_dst_languages.append("Ilocano");
-arraylist_dst_languages.append("Indonesian");
-arraylist_dst_languages.append("Irish");
-arraylist_dst_languages.append("Italian");
-arraylist_dst_languages.append("Japanese");
-arraylist_dst_languages.append("Javanese");
-arraylist_dst_languages.append("Kannada");
-arraylist_dst_languages.append("Kazakh");
-arraylist_dst_languages.append("Khmer");
-arraylist_dst_languages.append("Kinyarwanda");
-arraylist_dst_languages.append("Konkani");
-arraylist_dst_languages.append("Korean");
-arraylist_dst_languages.append("Krio");
-arraylist_dst_languages.append("Kurdish (Kurmanji)");
-arraylist_dst_languages.append("Kurdish (Sorani)");
-arraylist_dst_languages.append("Kyrgyz");
-arraylist_dst_languages.append("Lao");
-arraylist_dst_languages.append("Latin");
-arraylist_dst_languages.append("Latvian");
-arraylist_dst_languages.append("Lingala");
-arraylist_dst_languages.append("Lithuanian");
-arraylist_dst_languages.append("Luganda");
-arraylist_dst_languages.append("Luxembourgish");
-arraylist_dst_languages.append("Macedonian");
-arraylist_dst_languages.append("Malagasy");
-arraylist_dst_languages.append("Malay");
-arraylist_dst_languages.append("Malayalam");
-arraylist_dst_languages.append("Maltese");
-arraylist_dst_languages.append("Maori");
-arraylist_dst_languages.append("Marathi");
-arraylist_dst_languages.append("Meiteilon (Manipuri)");
-arraylist_dst_languages.append("Mizo");
-arraylist_dst_languages.append("Mongolian");
-arraylist_dst_languages.append("Myanmar (Burmese)");
-arraylist_dst_languages.append("Nepali");
-arraylist_dst_languages.append("Norwegian");
-arraylist_dst_languages.append("Odiya (Oriya)");
-arraylist_dst_languages.append("Oromo");
-arraylist_dst_languages.append("Pashto");
-arraylist_dst_languages.append("Persian");
-arraylist_dst_languages.append("Polish");
-arraylist_dst_languages.append("Portuguese");
-arraylist_dst_languages.append("Punjabi");
-arraylist_dst_languages.append("Quechua");
-arraylist_dst_languages.append("Romanian");
-arraylist_dst_languages.append("Russian");
-arraylist_dst_languages.append("Samoan");
-arraylist_dst_languages.append("Sanskrit");
-arraylist_dst_languages.append("Scots Gaelic");
-arraylist_dst_languages.append("Sepedi");
-arraylist_dst_languages.append("Serbian");
-arraylist_dst_languages.append("Sesotho");
-arraylist_dst_languages.append("Shona");
-arraylist_dst_languages.append("Sindhi");
-arraylist_dst_languages.append("Sinhala");
-arraylist_dst_languages.append("Slovak");
-arraylist_dst_languages.append("Slovenian");
-arraylist_dst_languages.append("Somali");
-arraylist_dst_languages.append("Spanish");
-arraylist_dst_languages.append("Sundanese");
-arraylist_dst_languages.append("Swahili");
-arraylist_dst_languages.append("Swedish");
-arraylist_dst_languages.append("Tajik");
-arraylist_dst_languages.append("Tamil");
-arraylist_dst_languages.append("Tatar");
-arraylist_dst_languages.append("Telugu");
-arraylist_dst_languages.append("Thai");
-arraylist_dst_languages.append("Tigrinya");
-arraylist_dst_languages.append("Tsonga");
-arraylist_dst_languages.append("Turkish");
-arraylist_dst_languages.append("Turkmen");
-arraylist_dst_languages.append("Twi (Akan)");
-arraylist_dst_languages.append("Ukrainian");
-arraylist_dst_languages.append("Urdu");
-arraylist_dst_languages.append("Uyghur");
-arraylist_dst_languages.append("Uzbek");
-arraylist_dst_languages.append("Vietnamese");
-arraylist_dst_languages.append("Welsh");
-arraylist_dst_languages.append("Xhosa");
-arraylist_dst_languages.append("Yiddish");
-arraylist_dst_languages.append("Yoruba");
-arraylist_dst_languages.append("Zulu");
-
-map_dst_of_language = dict(zip(arraylist_dst_languages, arraylist_dst))
-map_language_of_dst = dict(zip(arraylist_dst, arraylist_dst_languages))
 
 q = queue.Queue()
 SampleRate = None
@@ -926,262 +324,1102 @@ translated_transcriptions = None
 text = None
 translated_text = None
 
-#----------------------------------------------------------- MISC FUNCTIONS ------------------------------------------------------------#
 
-def srt_formatter(subtitles, padding_before=0, padding_after=0):
-    """
-    Serialize a list of subtitles according to the SRT format, with optional time padding.
-    """
-    sub_rip_file = pysrt.SubRipFile()
-    for i, ((start, end), text) in enumerate(subtitles, start=1):
-        item = pysrt.SubRipItem()
-        item.index = i
-        item.text = six.text_type(text)
-        item.start.seconds = max(0, start - padding_before)
-        item.end.seconds = end + padding_after
-        sub_rip_file.append(item)
-    return '\n'.join(six.text_type(item) for item in sub_rip_file)
+class VoskLanguage:
+    def __init__(self):
+        self.list_langs = []
+        self.list_langs.append("ca")
+        self.list_langs.append("cn")
+        self.list_langs.append("cs")
+        self.list_langs.append("nl")
+        self.list_langs.append("en-us")
+        self.list_langs.append("eo")
+        self.list_langs.append("fr")
+        self.list_langs.append("de")
+        self.list_langs.append("hi")
+        self.list_langs.append("it")
+        self.list_langs.append("ja")
+        self.list_langs.append("kz")
+        self.list_langs.append("ko")
+        self.list_langs.append("fa")
+        self.list_langs.append("pl")
+        self.list_langs.append("pt")
+        self.list_langs.append("ru")
+        self.list_langs.append("es")
+        self.list_langs.append("sv")
+        self.list_langs.append("tr")
+        self.list_langs.append("ua")
+        self.list_langs.append("uz")
+        self.list_langs.append("vn")
+
+        self.list_models = []
+        self.list_models.append("vosk-model-small-ca-0.4")
+        self.list_models.append("vosk-model-small-cn-0.22")
+        self.list_models.append("vosk-model-small-cs-0.4-rhasspy")
+        self.list_models.append("vosk-model-small-nl-0.22")
+        self.list_models.append("vosk-model-small-en-us-0.15")
+        self.list_models.append("vosk-model-small-eo-0.42")
+        self.list_models.append("vosk-model-small-fr-0.22")
+        self.list_models.append("vosk-model-small-de-0.15")
+        self.list_models.append("vosk-model-small-hi-0.22")
+        self.list_models.append("vosk-model-small-it-0.22")
+        self.list_models.append("vosk-model-small-ja-0.22")
+        self.list_models.append("vosk-model-small-kz-0.15")
+        self.list_models.append("vosk-model-small-ko-0.22")
+        self.list_models.append("vosk-model-small-fa-0.5")
+        self.list_models.append("vosk-model-small-pl-0.22")
+        self.list_models.append("vosk-model-small-pt-0.3")
+        self.list_models.append("vosk-model-small-ru-0.22")
+        self.list_models.append("vosk-model-small-es-0.42")
+        self.list_models.append("vosk-model-small-sv-rhasspy-0.15")
+        self.list_models.append("vosk-model-small-tr-0.3")
+        self.list_models.append("vosk-model-small-uk-v3-small")
+        self.list_models.append("vosk-model-small-uz-0.22")
+        self.list_models.append("vosk-model-small-vn-0.3")
+
+        self.list_codes = []
+        self.list_codes.append("ca")
+        self.list_codes.append("zh")
+        self.list_codes.append("cs")
+        self.list_codes.append("nl")
+        self.list_codes.append("en")
+        self.list_codes.append("eo")
+        self.list_codes.append("fr")
+        self.list_codes.append("de")
+        self.list_codes.append("hi")
+        self.list_codes.append("it")
+        self.list_codes.append("ja")
+        self.list_codes.append("kk")
+        self.list_codes.append("ko")
+        self.list_codes.append("fa")
+        self.list_codes.append("pl")
+        self.list_codes.append("pt")
+        self.list_codes.append("ru")
+        self.list_codes.append("es")
+        self.list_codes.append("sv")
+        self.list_codes.append("tr")
+        self.list_codes.append("uk")
+        self.list_codes.append("vi")
+
+        self.list_names = []
+        self.list_names.append("Catalan")
+        self.list_names.append("Chinese")
+        self.list_names.append("Czech")
+        self.list_names.append("Dutch")
+        self.list_names.append("English")
+        self.list_names.append("Esperanto")
+        self.list_names.append("French")
+        self.list_names.append("German")
+        self.list_names.append("Hindi")
+        self.list_names.append("Italian")
+        self.list_names.append("Japanese")
+        self.list_names.append("Kazakh")
+        self.list_names.append("Korean")
+        self.list_names.append("Persian")
+        self.list_names.append("Polish")
+        self.list_names.append("Portuguese")
+        self.list_names.append("Russian")
+        self.list_names.append("Spanish")
+        self.list_names.append("Swedish")
+        self.list_names.append("Turkish")
+        self.list_names.append("Ukrainian")
+        self.list_names.append("Vietnamese")
+
+        self.lang_of_name = dict(zip(self.list_names, self.list_langs))
+        self.lang_of_code = dict(zip(self.list_codes, self.list_langs))
+        self.lang_of_model = dict(zip(self.list_models, self.list_langs))
+
+        self.model_of_name = dict(zip(self.list_names, self.list_models))
+        self.model_of_code = dict(zip(self.list_codes, self.list_models))
+        self.model_of_lang = dict(zip(self.list_langs, self.list_models))
+
+        self.name_of_model = dict(zip(self.list_models, self.list_names))
+        self.name_of_code = dict(zip(self.list_codes, self.list_names))
+        self.name_of_lang = dict(zip(self.list_langs, self.list_names))
+
+        self.code_of_name = dict(zip(self.list_names, self.list_codes))
+        self.code_of_lang = dict(zip(self.list_langs, self.list_codes))
+        self.code_of_model = dict(zip(self.list_models, self.list_codes))
+
+        self.dict = {
+                        'ca': 'Catalan',
+                        'zh': 'Chinese',
+                        'cs': 'Czech',
+                        'nl': 'Dutch',
+                        'en': 'English',
+                        'eo': 'Esperanto',
+                        'fr': 'French',
+                        'de': 'German',
+                        'hi': 'Hindi',
+                        'it': 'Italian',
+                        'ja': 'Japanese',
+                        'kk': 'Kazakh',
+                        'ko': 'Korean',
+                        'fa': 'Persian',
+                        'pl': 'Polish',
+                        'pt': 'Portuguese',
+                        'ru': 'Russian',
+                        'es': 'Spanish',
+                        'sv': 'Swedish',
+                        'tr': 'Turkish',
+                        'uk': 'Ukrainian',
+                        'vi': 'Vietnamese',
+					}
+
+    def get_lang_of_name(self, name):
+        return self.lang_of_name[name]
+
+    def get_lang_of_code(self, code):
+        return self.lang_of_code[code]
+
+    def get_lang_of_model(self, model):
+        return self.lang_of_model[model]
+
+    def get_model_of_name(self, name):
+        return self.model_of_name[name]
+
+    def get_model_of_code(self, code):
+        return self.model_of_code[code]
+
+    def get_model_of_lang(self, lang):
+        return self.model_of_lang[lang]
+
+    def get_name_of_model(self, model):
+        return self.name_of_model[model]
+
+    def get_name_of_code(self, code):
+        return self.name_of_code[code]
+
+    def get_name_of_lang(self, lang):
+        return self.name_of_lang[lang]
+
+    def get_code_of_name(self, name):
+        return self.code_of_name[name]
+
+    def get_code_of_lang(self, lang):
+        return self.code_of_lang[lang]
+
+    def get_code_of_model(self, model):
+        return self.code_of_model[model]
 
 
-def vtt_formatter(subtitles, padding_before=0, padding_after=0):
-    """
-    Serialize a list of subtitles according to the VTT format, with optional time padding.
-    """
-    text = srt_formatter(subtitles, padding_before, padding_after)
-    text = 'WEBVTT\n\n' + text.replace(',', '.')
-    return text
+class GoogleLanguage:
+    def __init__(self):
+        self.list_codes = []
+        self.list_codes.append("af")
+        self.list_codes.append("sq")
+        self.list_codes.append("am")
+        self.list_codes.append("ar")
+        self.list_codes.append("hy")
+        self.list_codes.append("as")
+        self.list_codes.append("ay")
+        self.list_codes.append("az")
+        self.list_codes.append("bm")
+        self.list_codes.append("eu")
+        self.list_codes.append("be")
+        self.list_codes.append("bn")
+        self.list_codes.append("bho")
+        self.list_codes.append("bs")
+        self.list_codes.append("bg")
+        self.list_codes.append("ca")
+        self.list_codes.append("ceb")
+        self.list_codes.append("ny")
+        self.list_codes.append("zh")
+        self.list_codes.append("zh-CN")
+        self.list_codes.append("zh-TW")
+        self.list_codes.append("co")
+        self.list_codes.append("hr")
+        self.list_codes.append("cs")
+        self.list_codes.append("da")
+        self.list_codes.append("dv")
+        self.list_codes.append("doi")
+        self.list_codes.append("nl")
+        self.list_codes.append("en")
+        self.list_codes.append("eo")
+        self.list_codes.append("et")
+        self.list_codes.append("ee")
+        self.list_codes.append("fil")
+        self.list_codes.append("fi")
+        self.list_codes.append("fr")
+        self.list_codes.append("fy")
+        self.list_codes.append("gl")
+        self.list_codes.append("ka")
+        self.list_codes.append("de")
+        self.list_codes.append("el")
+        self.list_codes.append("gn")
+        self.list_codes.append("gu")
+        self.list_codes.append("ht")
+        self.list_codes.append("ha")
+        self.list_codes.append("haw")
+        self.list_codes.append("he")
+        self.list_codes.append("hi")
+        self.list_codes.append("hmn")
+        self.list_codes.append("hu")
+        self.list_codes.append("is")
+        self.list_codes.append("ig")
+        self.list_codes.append("ilo")
+        self.list_codes.append("id")
+        self.list_codes.append("ga")
+        self.list_codes.append("it")
+        self.list_codes.append("ja")
+        self.list_codes.append("jv")
+        self.list_codes.append("kn")
+        self.list_codes.append("kk")
+        self.list_codes.append("km")
+        self.list_codes.append("rw")
+        self.list_codes.append("gom")
+        self.list_codes.append("ko")
+        self.list_codes.append("kri")
+        self.list_codes.append("kmr")
+        self.list_codes.append("ckb")
+        self.list_codes.append("ky")
+        self.list_codes.append("lo")
+        self.list_codes.append("la")
+        self.list_codes.append("lv")
+        self.list_codes.append("ln")
+        self.list_codes.append("lt")
+        self.list_codes.append("lg")
+        self.list_codes.append("lb")
+        self.list_codes.append("mk")
+        self.list_codes.append("mg")
+        self.list_codes.append("ms")
+        self.list_codes.append("ml")
+        self.list_codes.append("mt")
+        self.list_codes.append("mi")
+        self.list_codes.append("mr")
+        self.list_codes.append("mni-Mtei")
+        self.list_codes.append("lus")
+        self.list_codes.append("mn")
+        self.list_codes.append("my")
+        self.list_codes.append("ne")
+        self.list_codes.append("no")
+        self.list_codes.append("or")
+        self.list_codes.append("om")
+        self.list_codes.append("ps")
+        self.list_codes.append("fa")
+        self.list_codes.append("pl")
+        self.list_codes.append("pt")
+        self.list_codes.append("pa")
+        self.list_codes.append("qu")
+        self.list_codes.append("ro")
+        self.list_codes.append("ru")
+        self.list_codes.append("sm")
+        self.list_codes.append("sa")
+        self.list_codes.append("gd")
+        self.list_codes.append("nso")
+        self.list_codes.append("sr")
+        self.list_codes.append("st")
+        self.list_codes.append("sn")
+        self.list_codes.append("sd")
+        self.list_codes.append("si")
+        self.list_codes.append("sk")
+        self.list_codes.append("sl")
+        self.list_codes.append("so")
+        self.list_codes.append("es")
+        self.list_codes.append("su")
+        self.list_codes.append("sw")
+        self.list_codes.append("sv")
+        self.list_codes.append("tg")
+        self.list_codes.append("ta")
+        self.list_codes.append("tt")
+        self.list_codes.append("te")
+        self.list_codes.append("th")
+        self.list_codes.append("ti")
+        self.list_codes.append("ts")
+        self.list_codes.append("tr")
+        self.list_codes.append("tk")
+        self.list_codes.append("tw")
+        self.list_codes.append("uk")
+        self.list_codes.append("ur")
+        self.list_codes.append("ug")
+        self.list_codes.append("uz")
+        self.list_codes.append("vi")
+        self.list_codes.append("cy")
+        self.list_codes.append("xh")
+        self.list_codes.append("yi")
+        self.list_codes.append("yo")
+        self.list_codes.append("zu")
+
+        self.list_names = []
+        self.list_names.append("Afrikaans")
+        self.list_names.append("Albanian")
+        self.list_names.append("Amharic")
+        self.list_names.append("Arabic")
+        self.list_names.append("Armenian")
+        self.list_names.append("Assamese")
+        self.list_names.append("Aymara")
+        self.list_names.append("Azerbaijani")
+        self.list_names.append("Bambara")
+        self.list_names.append("Basque")
+        self.list_names.append("Belarusian")
+        self.list_names.append("Bengali")
+        self.list_names.append("Bhojpuri")
+        self.list_names.append("Bosnian")
+        self.list_names.append("Bulgarian")
+        self.list_names.append("Catalan")
+        self.list_names.append("Cebuano")
+        self.list_names.append("Chichewa")
+        self.list_names.append("Chinese")
+        self.list_names.append("Chinese (Simplified)")
+        self.list_names.append("Chinese (Traditional)")
+        self.list_names.append("Corsican")
+        self.list_names.append("Croatian")
+        self.list_names.append("Czech")
+        self.list_names.append("Danish")
+        self.list_names.append("Dhivehi")
+        self.list_names.append("Dogri")
+        self.list_names.append("Dutch")
+        self.list_names.append("English")
+        self.list_names.append("Esperanto")
+        self.list_names.append("Estonian")
+        self.list_names.append("Ewe")
+        self.list_names.append("Filipino")
+        self.list_names.append("Finnish")
+        self.list_names.append("French")
+        self.list_names.append("Frisian")
+        self.list_names.append("Galician")
+        self.list_names.append("Georgian")
+        self.list_names.append("German")
+        self.list_names.append("Greek")
+        self.list_names.append("Guarani")
+        self.list_names.append("Gujarati")
+        self.list_names.append("Haitian Creole")
+        self.list_names.append("Hausa")
+        self.list_names.append("Hawaiian")
+        self.list_names.append("Hebrew")
+        self.list_names.append("Hindi")
+        self.list_names.append("Hmong")
+        self.list_names.append("Hungarian")
+        self.list_names.append("Icelandic")
+        self.list_names.append("Igbo")
+        self.list_names.append("Ilocano")
+        self.list_names.append("Indonesian")
+        self.list_names.append("Irish")
+        self.list_names.append("Italian")
+        self.list_names.append("Japanese")
+        self.list_names.append("Javanese")
+        self.list_names.append("Kannada")
+        self.list_names.append("Kazakh")
+        self.list_names.append("Khmer")
+        self.list_names.append("Kinyarwanda")
+        self.list_names.append("Konkani")
+        self.list_names.append("Korean")
+        self.list_names.append("Krio")
+        self.list_names.append("Kurdish (Kurmanji)")
+        self.list_names.append("Kurdish (Sorani)")
+        self.list_names.append("Kyrgyz")
+        self.list_names.append("Lao")
+        self.list_names.append("Latin")
+        self.list_names.append("Latvian")
+        self.list_names.append("Lingala")
+        self.list_names.append("Lithuanian")
+        self.list_names.append("Luganda")
+        self.list_names.append("Luxembourgish")
+        self.list_names.append("Macedonian")
+        self.list_names.append("Malagasy")
+        self.list_names.append("Malay")
+        self.list_names.append("Malayalam")
+        self.list_names.append("Maltese")
+        self.list_names.append("Maori")
+        self.list_names.append("Marathi")
+        self.list_names.append("Meiteilon (Manipuri)")
+        self.list_names.append("Mizo")
+        self.list_names.append("Mongolian")
+        self.list_names.append("Myanmar (Burmese)")
+        self.list_names.append("Nepali")
+        self.list_names.append("Norwegian")
+        self.list_names.append("Odiya (Oriya)")
+        self.list_names.append("Oromo")
+        self.list_names.append("Pashto")
+        self.list_names.append("Persian")
+        self.list_names.append("Polish")
+        self.list_names.append("Portuguese")
+        self.list_names.append("Punjabi")
+        self.list_names.append("Quechua")
+        self.list_names.append("Romanian")
+        self.list_names.append("Russian")
+        self.list_names.append("Samoan")
+        self.list_names.append("Sanskrit")
+        self.list_names.append("Scots Gaelic")
+        self.list_names.append("Sepedi")
+        self.list_names.append("Serbian")
+        self.list_names.append("Sesotho")
+        self.list_names.append("Shona")
+        self.list_names.append("Sindhi")
+        self.list_names.append("Sinhala")
+        self.list_names.append("Slovak")
+        self.list_names.append("Slovenian")
+        self.list_names.append("Somali")
+        self.list_names.append("Spanish")
+        self.list_names.append("Sundanese")
+        self.list_names.append("Swahili")
+        self.list_names.append("Swedish")
+        self.list_names.append("Tajik")
+        self.list_names.append("Tamil")
+        self.list_names.append("Tatar")
+        self.list_names.append("Telugu")
+        self.list_names.append("Thai")
+        self.list_names.append("Tigrinya")
+        self.list_names.append("Tsonga")
+        self.list_names.append("Turkish")
+        self.list_names.append("Turkmen")
+        self.list_names.append("Twi (Akan)")
+        self.list_names.append("Ukrainian")
+        self.list_names.append("Urdu")
+        self.list_names.append("Uyghur")
+        self.list_names.append("Uzbek")
+        self.list_names.append("Vietnamese")
+        self.list_names.append("Welsh")
+        self.list_names.append("Xhosa")
+        self.list_names.append("Yiddish")
+        self.list_names.append("Yoruba")
+        self.list_names.append("Zulu")
+
+        # NOTE THAT Google Translate AND Vosk Speech Recognition API USE ISO-639-1 STANDARD CODE ('al', 'af', 'as', ETC)
+        # WHEN ffmpeg SUBTITLES STREAMS USE ISO 639-2 STANDARD CODE ('afr', 'alb', 'amh', ETC)
+
+        self.list_ffmpeg_codes = []
+        self.list_ffmpeg_codes.append("afr")  # Afrikaans
+        self.list_ffmpeg_codes.append("alb")  # Albanian
+        self.list_ffmpeg_codes.append("amh")  # Amharic
+        self.list_ffmpeg_codes.append("ara")  # Arabic
+        self.list_ffmpeg_codes.append("hye")  # Armenian
+        self.list_ffmpeg_codes.append("asm")  # Assamese
+        self.list_ffmpeg_codes.append("aym")  # Aymara
+        self.list_ffmpeg_codes.append("aze")  # Azerbaijani
+        self.list_ffmpeg_codes.append("bam")  # Bambara
+        self.list_ffmpeg_codes.append("eus")  # Basque
+        self.list_ffmpeg_codes.append("bel")  # Belarusian
+        self.list_ffmpeg_codes.append("ben")  # Bengali
+        self.list_ffmpeg_codes.append("bho")  # Bhojpuri
+        self.list_ffmpeg_codes.append("bos")  # Bosnian
+        self.list_ffmpeg_codes.append("bul")  # Bulgarian
+        self.list_ffmpeg_codes.append("cat")  # Catalan
+        self.list_ffmpeg_codes.append("ceb")  # Cebuano
+        self.list_ffmpeg_codes.append("nya")  # Chichewa
+        self.list_ffmpeg_codes.append("zho")  # Chinese
+        self.list_ffmpeg_codes.append("zho-CN")  # Chinese (Simplified)
+        self.list_ffmpeg_codes.append("zho-TW")  # Chinese (Traditional)
+        self.list_ffmpeg_codes.append("cos")  # Corsican
+        self.list_ffmpeg_codes.append("hrv")  # Croatian
+        self.list_ffmpeg_codes.append("ces")  # Czech
+        self.list_ffmpeg_codes.append("dan")  # Danish
+        self.list_ffmpeg_codes.append("div")  # Dhivehi
+        self.list_ffmpeg_codes.append("doi")  # Dogri
+        self.list_ffmpeg_codes.append("nld")  # Dutch
+        self.list_ffmpeg_codes.append("eng")  # English
+        self.list_ffmpeg_codes.append("epo")  # Esperanto
+        self.list_ffmpeg_codes.append("est")  # Estonian
+        self.list_ffmpeg_codes.append("ewe")  # Ewe
+        self.list_ffmpeg_codes.append("fil")  # Filipino
+        self.list_ffmpeg_codes.append("fin")  # Finnish
+        self.list_ffmpeg_codes.append("fra")  # French
+        self.list_ffmpeg_codes.append("fry")  # Frisian
+        self.list_ffmpeg_codes.append("glg")  # Galician
+        self.list_ffmpeg_codes.append("kat")  # Georgian
+        self.list_ffmpeg_codes.append("deu")  # German
+        self.list_ffmpeg_codes.append("ell")  # Greek
+        self.list_ffmpeg_codes.append("grn")  # Guarani
+        self.list_ffmpeg_codes.append("guj")  # Gujarati
+        self.list_ffmpeg_codes.append("hat")  # Haitian Creole
+        self.list_ffmpeg_codes.append("hau")  # Hausa
+        self.list_ffmpeg_codes.append("haw")  # Hawaiian
+        self.list_ffmpeg_codes.append("heb")  # Hebrew
+        self.list_ffmpeg_codes.append("hin")  # Hindi
+        self.list_ffmpeg_codes.append("hmn")  # Hmong
+        self.list_ffmpeg_codes.append("hun")  # Hungarian
+        self.list_ffmpeg_codes.append("isl")  # Icelandic
+        self.list_ffmpeg_codes.append("ibo")  # Igbo
+        self.list_ffmpeg_codes.append("ilo")  # Ilocano
+        self.list_ffmpeg_codes.append("ind")  # Indonesian
+        self.list_ffmpeg_codes.append("gle")  # Irish
+        self.list_ffmpeg_codes.append("ita")  # Italian
+        self.list_ffmpeg_codes.append("jpn")  # Japanese
+        self.list_ffmpeg_codes.append("jav")  # Javanese
+        self.list_ffmpeg_codes.append("kan")  # Kannada
+        self.list_ffmpeg_codes.append("kaz")  # Kazakh
+        self.list_ffmpeg_codes.append("khm")  # Khmer
+        self.list_ffmpeg_codes.append("kin")  # Kinyarwanda
+        self.list_ffmpeg_codes.append("kok")  # Konkani
+        self.list_ffmpeg_codes.append("kor")  # Korean
+        self.list_ffmpeg_codes.append("kri")  # Krio
+        self.list_ffmpeg_codes.append("kmr")  # Kurdish (Kurmanji)
+        self.list_ffmpeg_codes.append("ckb")  # Kurdish (Sorani)
+        self.list_ffmpeg_codes.append("kir")  # Kyrgyz
+        self.list_ffmpeg_codes.append("lao")  # Lao
+        self.list_ffmpeg_codes.append("lat")  # Latin
+        self.list_ffmpeg_codes.append("lav")  # Latvian
+        self.list_ffmpeg_codes.append("lin")  # Lingala
+        self.list_ffmpeg_codes.append("lit")  # Lithuanian
+        self.list_ffmpeg_codes.append("lug")  # Luganda
+        self.list_ffmpeg_codes.append("ltz")  # Luxembourgish
+        self.list_ffmpeg_codes.append("mkd")  # Macedonian
+        self.list_ffmpeg_codes.append("mlg")  # Malagasy
+        self.list_ffmpeg_codes.append("msa")  # Malay
+        self.list_ffmpeg_codes.append("mal")  # Malayalam
+        self.list_ffmpeg_codes.append("mlt")  # Maltese
+        self.list_ffmpeg_codes.append("mri")  # Maori
+        self.list_ffmpeg_codes.append("mar")  # Marathi
+        self.list_ffmpeg_codes.append("mni-Mtei")  # Meiteilon (Manipuri)
+        self.list_ffmpeg_codes.append("lus")  # Mizo
+        self.list_ffmpeg_codes.append("mon")  # Mongolian
+        self.list_ffmpeg_codes.append("mya")  # Myanmar (Burmese)
+        self.list_ffmpeg_codes.append("nep")  # Nepali
+        self.list_ffmpeg_codes.append("nor")  # Norwegian
+        self.list_ffmpeg_codes.append("ori")  # Odiya (Oriya)
+        self.list_ffmpeg_codes.append("orm")  # Oromo
+        self.list_ffmpeg_codes.append("pus")  # Pashto
+        self.list_ffmpeg_codes.append("fas")  # Persian
+        self.list_ffmpeg_codes.append("pol")  # Polish
+        self.list_ffmpeg_codes.append("por")  # Portuguese
+        self.list_ffmpeg_codes.append("pan")  # Punjabi
+        self.list_ffmpeg_codes.append("que")  # Quechua
+        self.list_ffmpeg_codes.append("ron")  # Romanian
+        self.list_ffmpeg_codes.append("rus")  # Russian
+        self.list_ffmpeg_codes.append("smo")  # Samoan
+        self.list_ffmpeg_codes.append("san")  # Sanskrit
+        self.list_ffmpeg_codes.append("gla")  # Scots Gaelic
+        self.list_ffmpeg_codes.append("nso")  # Sepedi
+        self.list_ffmpeg_codes.append("srp")  # Serbian
+        self.list_ffmpeg_codes.append("sot")  # Sesotho
+        self.list_ffmpeg_codes.append("sna")  # Shona
+        self.list_ffmpeg_codes.append("snd")  # Sindhi
+        self.list_ffmpeg_codes.append("sin")  # Sinhala
+        self.list_ffmpeg_codes.append("slk")  # Slovak
+        self.list_ffmpeg_codes.append("slv")  # Slovenian
+        self.list_ffmpeg_codes.append("som")  # Somali
+        self.list_ffmpeg_codes.append("spa")  # Spanish
+        self.list_ffmpeg_codes.append("sun")  # Sundanese
+        self.list_ffmpeg_codes.append("swa")  # Swahili
+        self.list_ffmpeg_codes.append("swe")  # Swedish
+        self.list_ffmpeg_codes.append("tgk")  # Tajik
+        self.list_ffmpeg_codes.append("tam")  # Tamil
+        self.list_ffmpeg_codes.append("tat")  # Tatar
+        self.list_ffmpeg_codes.append("tel")  # Telugu
+        self.list_ffmpeg_codes.append("tha")  # Thai
+        self.list_ffmpeg_codes.append("tir")  # Tigrinya
+        self.list_ffmpeg_codes.append("tso")  # Tsonga
+        self.list_ffmpeg_codes.append("tur")  # Turkish
+        self.list_ffmpeg_codes.append("tuk")  # Turkmen
+        self.list_ffmpeg_codes.append("twi")  # Twi (Akan)
+        self.list_ffmpeg_codes.append("ukr")  # Ukrainian
+        self.list_ffmpeg_codes.append("urd")  # Urdu
+        self.list_ffmpeg_codes.append("uig")  # Uyghur
+        self.list_ffmpeg_codes.append("uzb")  # Uzbek
+        self.list_ffmpeg_codes.append("vie")  # Vietnamese
+        self.list_ffmpeg_codes.append("wel")  # Welsh
+        self.list_ffmpeg_codes.append("xho")  # Xhosa
+        self.list_ffmpeg_codes.append("yid")  # Yiddish
+        self.list_ffmpeg_codes.append("yor")  # Yoruba
+        self.list_ffmpeg_codes.append("zul")  # Zulu
+
+        self.code_of_name = dict(zip(self.list_names, self.list_codes))
+        self.code_of_ffmpeg_code = dict(zip(self.list_ffmpeg_codes, self.list_codes))
+
+        self.name_of_code = dict(zip(self.list_codes, self.list_names))
+        self.name_of_ffmpeg_code = dict(zip(self.list_ffmpeg_codes, self.list_names))
+
+        self.ffmpeg_code_of_name = dict(zip(self.list_names, self.list_ffmpeg_codes))
+        self.ffmpeg_code_of_code = dict(zip(self.list_codes, self.list_ffmpeg_codes))
+
+        self.dict = {
+                        'af': 'Afrikaans',
+                        'sq': 'Albanian',
+                        'am': 'Amharic',
+                        'ar': 'Arabic',
+                        'hy': 'Armenian',
+                        'as': 'Assamese',
+                        'ay': 'Aymara',
+                        'az': 'Azerbaijani',
+                        'bm': 'Bambara',
+                        'eu': 'Basque',
+                        'be': 'Belarusian',
+                        'bn': 'Bengali',
+                        'bho': 'Bhojpuri',
+                        'bs': 'Bosnian',
+                        'bg': 'Bulgarian',
+                        'ca': 'Catalan',
+                        'ceb': 'Cebuano',
+                        'ny': 'Chichewa',
+                        'zh': 'Chinese',
+                        'zh-CN': 'Chinese (Simplified)',
+                        'zh-TW': 'Chinese (Traditional)',
+                        'co': 'Corsican',
+                        'hr': 'Croatian',
+                        'cs': 'Czech',
+                        'da': 'Danish',
+                        'dv': 'Dhivehi',
+                        'doi': 'Dogri',
+                        'nl': 'Dutch',
+                        'en': 'English',
+                        'eo': 'Esperanto',
+                        'et': 'Estonian',
+                        'ee': 'Ewe',
+                        'fil': 'Filipino',
+                        'fi': 'Finnish',
+                        'fr': 'French',
+                        'fy': 'Frisian',
+                        'gl': 'Galician',
+                        'ka': 'Georgian',
+                        'de': 'German',
+                        'el': 'Greek',
+                        'gn': 'Guarani',
+                        'gu': 'Gujarati',
+                        'ht': 'Haitian Creole',
+                        'ha': 'Hausa',
+                        'haw': 'Hawaiian',
+                        'he': 'Hebrew',
+                        'hi': 'Hindi',
+                        'hmn': 'Hmong',
+                        'hu': 'Hungarian',
+                        'is': 'Icelandic',
+                        'ig': 'Igbo',
+                        'ilo': 'Ilocano',
+                        'id': 'Indonesian',
+                        'ga': 'Irish',
+                        'it': 'Italian',
+                        'ja': 'Japanese',
+                        'jv': 'Javanese',
+                        'kn': 'Kannada',
+                        'kk': 'Kazakh',
+                        'km': 'Khmer',
+                        'rw': 'Kinyarwanda',
+                        'gom': 'Konkani',
+                        'ko': 'Korean',
+                        'kri': 'Krio',
+                        'kmr': 'Kurdish (Kurmanji)',
+                        'ckb': 'Kurdish (Sorani)',
+                        'ky': 'Kyrgyz',
+                        'lo': 'Lao',
+                        'la': 'Latin',
+                        'lv': 'Latvian',
+                        'ln': 'Lingala',
+                        'lt': 'Lithuanian',
+                        'lg': 'Luganda',
+                        'lb': 'Luxembourgish',
+                        'mk': 'Macedonian',
+                        'mg': 'Malagasy',
+                        'ms': 'Malay',
+                        'ml': 'Malayalam',
+                        'mt': 'Maltese',
+                        'mi': 'Maori',
+                        'mr': 'Marathi',
+                        'mni-Mtei': 'Meiteilon (Manipuri)',
+                        'lus': 'Mizo',
+                        'mn': 'Mongolian',
+                        'my': 'Myanmar (Burmese)',
+                        'ne': 'Nepali',
+                        'no': 'Norwegian',
+                        'or': 'Odiya (Oriya)',
+                        'om': 'Oromo',
+                        'ps': 'Pashto',
+                        'fa': 'Persian',
+                        'pl': 'Polish',
+                        'pt': 'Portuguese',
+                        'pa': 'Punjabi',
+                        'qu': 'Quechua',
+                        'ro': 'Romanian',
+                        'ru': 'Russian',
+                        'sm': 'Samoan',
+                        'sa': 'Sanskrit',
+                        'gd': 'Scots Gaelic',
+                        'nso': 'Sepedi',
+                        'sr': 'Serbian',
+                        'st': 'Sesotho',
+                        'sn': 'Shona',
+                        'sd': 'Sindhi',
+                        'si': 'Sinhala',
+                        'sk': 'Slovak',
+                        'sl': 'Slovenian',
+                        'so': 'Somali',
+                        'es': 'Spanish',
+                        'su': 'Sundanese',
+                        'sw': 'Swahili',
+                        'sv': 'Swedish',
+                        'tg': 'Tajik',
+                        'ta': 'Tamil',
+                        'tt': 'Tatar',
+                        'te': 'Telugu',
+                        'th': 'Thai',
+                        'ti': 'Tigrinya',
+                        'ts': 'Tsonga',
+                        'tr': 'Turkish',
+                        'tk': 'Turkmen',
+                        'tw': 'Twi (Akan)',
+                        'uk': 'Ukrainian',
+                        'ur': 'Urdu',
+                        'ug': 'Uyghur',
+                        'uz': 'Uzbek',
+                        'vi': 'Vietnamese',
+                        'cy': 'Welsh',
+                        'xh': 'Xhosa',
+                        'yi': 'Yiddish',
+                        'yo': 'Yoruba',
+                        'zu': 'Zulu',
+                    }
+
+        self.ffmpeg_dict = {
+                                'af': 'afr', # Afrikaans
+                                'sq': 'alb', # Albanian
+                                'am': 'amh', # Amharic
+                                'ar': 'ara', # Arabic
+                                'hy': 'arm', # Armenian
+                                'as': 'asm', # Assamese
+                                'ay': 'aym', # Aymara
+                                'az': 'aze', # Azerbaijani
+                                'bm': 'bam', # Bambara
+                                'eu': 'baq', # Basque
+                                'be': 'bel', # Belarusian
+                                'bn': 'ben', # Bengali
+                                'bho': 'bho', # Bhojpuri
+                                'bs': 'bos', # Bosnian
+                                'bg': 'bul', # Bulgarian
+                                'ca': 'cat', # Catalan
+                                'ceb': 'ceb', # Cebuano
+                                'ny': 'nya', # Chichewa
+                                'zh': 'chi', # Chinese
+                                'zh-CN': 'chi', # Chinese (Simplified)
+                                'zh-TW': 'chi', # Chinese (Traditional)
+                                'co': 'cos', # Corsican
+                                'hr': 'hrv', # Croatian
+                                'cs': 'cze', # Czech
+                                'da': 'dan', # Danish
+                                'dv': 'div', # Dhivehi
+                                'doi': 'doi', # Dogri
+                                'nl': 'dut', # Dutch
+                                'en': 'eng', # English
+                                'eo': 'epo', # Esperanto
+                                'et': 'est', # Estonian
+                                'ee': 'ewe', # Ewe
+                                'fil': 'fil', # Filipino
+                                'fi': 'fin', # Finnish
+                                'fr': 'fre', # French
+                                'fy': 'fry', # Frisian
+                                'gl': 'glg', # Galician
+                                'ka': 'geo', # Georgian
+                                'de': 'ger', # German
+                                'el': 'gre', # Greek
+                                'gn': 'grn', # Guarani
+                                'gu': 'guj', # Gujarati
+                                'ht': 'hat', # Haitian Creole
+                                'ha': 'hau', # Hausa
+                                'haw': 'haw', # Hawaiian
+                                'he': 'heb', # Hebrew
+                                'hi': 'hin', # Hindi
+                                'hmn': 'hmn', # Hmong
+                                'hu': 'hun', # Hungarian
+                                'is': 'ice', # Icelandic
+                                'ig': 'ibo', # Igbo
+                                'ilo': 'ilo', # Ilocano
+                                'id': 'ind', # Indonesian
+                                'ga': 'gle', # Irish
+                                'it': 'ita', # Italian
+                                'ja': 'jpn', # Japanese
+                                'jv': 'jav', # Javanese
+                                'kn': 'kan', # Kannada
+                                'kk': 'kaz', # Kazakh
+                                'km': 'khm', # Khmer
+                                'rw': 'kin', # Kinyarwanda
+                                'gom': 'kok', # Konkani
+                                'ko': 'kor', # Korean
+                                'kri': 'kri', # Krio
+                                'kmr': 'kur', # Kurdish (Kurmanji)
+                                'ckb': 'kur', # Kurdish (Sorani)
+                                'ky': 'kir', # Kyrgyz
+                                'lo': 'lao', # Lao
+                                'la': 'lat', # Latin
+                                'lv': 'lav', # Latvian
+                                'ln': 'lin', # Lingala
+                                'lt': 'lit', # Lithuanian
+                                'lg': 'lug', # Luganda
+                                'lb': 'ltz', # Luxembourgish
+                                'mk': 'mac', # Macedonian
+                                'mg': 'mlg', # Malagasy
+                                'ms': 'may', # Malay
+                                'ml': 'mal', # Malayalam
+                                'mt': 'mlt', # Maltese
+                                'mi': 'mao', # Maori
+                                'mr': 'mar', # Marathi
+                                'mni-Mtei': 'mni', # Meiteilon (Manipuri)
+                                'lus': 'lus', # Mizo
+                                'mn': 'mon', # Mongolian
+                                'my': 'bur', # Myanmar (Burmese)
+                                'ne': 'nep', # Nepali
+                                'no': 'nor', # Norwegian
+                                'or': 'ori', # Odiya (Oriya)
+                                'om': 'orm', # Oromo
+                                'ps': 'pus', # Pashto
+                                'fa': 'per', # Persian
+                                'pl': 'pol', # Polish
+                                'pt': 'por', # Portuguese
+                                'pa': 'pan', # Punjabi
+                                'qu': 'que', # Quechua
+                                'ro': 'rum', # Romanian
+                                'ru': 'rus', # Russian
+                                'sm': 'smo', # Samoan
+                                'sa': 'san', # Sanskrit
+                                'gd': 'gla', # Scots Gaelic
+                                'nso': 'nso', # Sepedi
+                                'sr': 'srp', # Serbian
+                                'st': 'sot', # Sesotho
+                                'sn': 'sna', # Shona
+                                'sd': 'snd', # Sindhi
+                                'si': 'sin', # Sinhala
+                                'sk': 'slo', # Slovak
+                                'sl': 'slv', # Slovenian
+                                'so': 'som', # Somali
+                                'es': 'spa', # Spanish
+                                'su': 'sun', # Sundanese
+                                'sw': 'swa', # Swahili
+                                'sv': 'swe', # Swedish
+                                'tg': 'tgk', # Tajik
+                                'ta': 'tam', # Tamil
+                                'tt': 'tat', # Tatar
+                                'te': 'tel', # Telugu
+                                'th': 'tha', # Thai
+                                'ti': 'tir', # Tigrinya
+                                'ts': 'tso', # Tsonga
+                                'tr': 'tur', # Turkish
+                                'tk': 'tuk', # Turkmen
+                                'tw': 'twi', # Twi (Akan)
+                                'uk': 'ukr', # Ukrainian
+                                'ur': 'urd', # Urdu
+                                'ug': 'uig', # Uyghur
+                                'uz': 'uzb', # Uzbek
+                                'vi': 'vie', # Vietnamese
+                                'cy': 'wel', # Welsh
+                                'xh': 'xho', # Xhosa
+                                'yi': 'yid', # Yiddish
+                                'yo': 'yor', # Yoruba
+                                'zu': 'zul', # Zulu
+                           }
+
+    def get_code_of_name(self, name):
+        return self.code_of_name[name]
+
+    def get_code_of_ffmpeg_code(self, ffmpeg_code):
+        return self.code_of_ffmpeg_code[ffmpeg_code]
+
+    def get_name_of_code(self, code):
+        return self.name_of_code[code]
+
+    def get_name_of_ffmpeg_code(self, ffmpeg_code):
+        return self.name_of_ffmpeg_code[ffmpeg_code]
+
+    def get_ffmpeg_code_of_name(self, name):
+        return self.ffmpeg_code_of_name[name]
+
+    def get_ffmpeg_code_of_code(self, code):
+        return self.ffmpeg_code_of_code[code]
 
 
-def json_formatter(subtitles):
-    """
-    Serialize a list of subtitles as a JSON blob.
-    """
-    subtitle_dicts = [
-        {
-            'start': start,
-            'end': end,
-            'content': text,
-        }
-        for ((start, end), text)
-        in subtitles
-    ]
-    return json.dumps(subtitle_dicts)
-
-
-def raw_formatter(subtitles):
-    """
-    Serialize a list of subtitles as a newline-delimited string.
-    """
-    return ' '.join(text for (_rng, text) in subtitles)
-
-
-FORMATTERS = {
-    'srt': srt_formatter,
-    'vtt': vtt_formatter,
-    'json': json_formatter,
-    'raw': raw_formatter,
-}
-
-
-def int_or_str(text):
-    """Helper function for argument parsing."""
-    try:
-        return int(text)
-    except ValueError:
-        return text
-
-
-def callback(indata, frames, time, status):
-    """This is called (from a separate thread) for each audio block."""
-    if status:
-        print(status, file=sys.stderr)
-    q.put(bytes(indata))
-
-
-def worker_recognize(src, dst):
-    global main_window, recognizing, text, Device, SampleRate, wav_filepath, regions, transcriptions, \
-        start_button_click_time, ffmpeg_start_run_time, tmp_recorded_streaming_filepath, get_tmp_recorded_streaming_filepath_time, \
-        loading_time, first_streaming_duration_recorded
-
-    p = 0
-    f = 0
-    l = 0
-
-    start_time = None
-    end_time = None
-    first_streaming_duration_recorded = None
-    absolute_start_time = None
-    audio_filename, SampleRate = None, None
-    first_regions = None
-    model = None
-
-    time_value_filename = "time_value"
-    time_value_filepath = os.path.join(tempfile.gettempdir(), time_value_filename)
-    #print("time_value_filepath = {}".format(time_value_filepath))
-    #print("os.path.isfile(time_value_filepath) = {}".format(os.path.isfile(time_value_filepath)))
-    if os.path.isfile(time_value_filepath):
-        time_value_file = open(time_value_filepath, "r")
-        time_value_string = time_value_file.read()
-        if time_value_string:
-            first_streaming_duration_recorded = datetime.strptime(time_value_string, "%H:%M:%S.%f") - datetime(1900, 1, 1)
+class WavConverter:
+    @staticmethod
+    def which(program):
+        def is_exe(file_path):
+            return os.path.isfile(file_path) and os.access(file_path, os.X_OK)
+        fpath, _ = os.path.split(program)
+        if fpath:
+            if is_exe(program):
+                return program
         else:
-            first_streaming_duration_recorded = None
-        time_value_file.close()
+            for path in os.environ["PATH"].split(os.pathsep):
+                path = path.strip('"')
+                exe_file = os.path.join(path, program)
+                if is_exe(exe_file):
+                    return exe_file
+        return None
 
-    try:
-        if SampleRate is None:
-            #soundfile expects an int, sounddevice provides a float:
-            device_info = sd.query_devices(Device, "input")
-            SampleRate = int(device_info["default_samplerate"])
+    @staticmethod
+    def ffprobe_check():
+        if WavConverter.which("ffprobe"):
+            return "ffprobe"
+        if WavConverter.which("ffprobe.exe"):
+            return "ffprobe.exe"
+        return None
 
-        if wav_filepath:
-            dump_fn = open(wav_filepath, "wb")
-        else:
-            dump_fn = None
+    @staticmethod
+    def ffmpeg_check():
+        if WavConverter.which("ffmpeg"):
+            return "ffmpeg"
+        if WavConverter.which("ffmpeg.exe"):
+            return "ffmpeg.exe"
+        return None
 
-        model = Model(lang = src)
+    def __init__(self, channels=1, rate=48000, progress_callback=None, error_messages_callback=None):
+        self.channels = channels
+        self.rate = rate
+        self.progress_callback = progress_callback
+        self.error_messages_callback = error_messages_callback
 
-        with sd.RawInputStream(samplerate=SampleRate, blocksize=8000, device=Device, dtype="int16", channels=1, callback=callback):
+    def __call__(self, media_filepath):
+        temp = tempfile.NamedTemporaryFile(suffix='.wav', delete=False)
 
-            rec = KaldiRecognizer(model, SampleRate)
+        if "\\" in media_filepath:
+            media_filepath = media_filepath.replace("\\", "/")
 
-            while recognizing:
-                if not recognizing:
-                    rec = None
-                    data = None
-                    result = None
-                    results_text = None
-                    partial_results_text = None
-                    #print("BREAK")
+        if not os.path.isfile(media_filepath):
+            if self.error_messages_callback:
+                self.error_messages_callback(f"The given file does not exist: {media_filepath}")
+            else:
+                print(f"The given file does not exist: {media_filepath}")
+                raise Exception(f"Invalid file: {media_filepath}")
+
+        if not self.ffprobe_check():
+            if self.error_messages_callback:
+                self.error_messages_callback("Cannot find ffprobe executable")
+            else:
+                print("Cannot find ffprobe executable")
+                raise Exception("Dependency not found: ffprobe")
+
+        if not self.ffmpeg_check():
+            if self.error_messages_callback:
+                self.error_messages_callback("Cannot find ffmpeg executable")
+            else:
+                print("Cannot find ffmpeg executable")
+                raise Exception("Dependency not found: ffmpeg")
+
+        ffmpeg_command = [
+                            'ffmpeg',
+                            '-hide_banner',
+                            '-loglevel', 'error',
+                            '-v', 'error',
+                            '-y',
+                            '-i', media_filepath,
+                            '-ac', str(self.channels),
+                            '-ar', str(self.rate),
+                            '-progress', '-', '-nostats',
+                            temp.name
+                         ]
+
+        try:
+            media_file_display_name = os.path.basename(media_filepath).split('/')[-1]
+            info = f"Converting '{media_file_display_name}' to a temporary WAV file"
+            start_time = time.time()
+
+            ffprobe_command = [
+                                'ffprobe',
+                                '-hide_banner',
+                                '-v', 'error',
+                                '-loglevel', 'error',
+                                '-show_entries',
+                                'format=duration',
+                                '-of', 'default=noprint_wrappers=1:nokey=1',
+                                media_filepath
+                              ]
+
+            ffprobe_process = None
+            if sys.platform == "win32":
+                ffprobe_process = subprocess.check_output(ffprobe_command, stdin=open(os.devnull), universal_newlines=True, shell=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            else:
+                ffprobe_process = subprocess.check_output(ffprobe_command, stdin=open(os.devnull), universal_newlines=True)
+
+            total_duration = float(ffprobe_process.strip())
+
+            process = None
+            if sys.platform == "win32":
+                process = subprocess.Popen(ffmpeg_command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=True, creationflags=subprocess.CREATE_NO_WINDOW)
+            else:
+                process = subprocess.Popen(ffmpeg_command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+
+            while True:
+                if process.stdout is None:
+                    continue
+
+                stderr_line = (process.stdout.readline().decode("utf-8", errors="replace").strip())
+ 
+                if stderr_line == '' and process.poll() is not None:
                     break
 
-                data = q.get()
+                if "out_time=" in stderr_line:
+                    time_str = stderr_line.split('time=')[1].split()[0]
+                    current_duration = sum(float(x) * 1000 * 60 ** i for i, x in enumerate(reversed(time_str.split(":"))))
 
-                results_text = ''
-                partial_results_text = ''
+                    if current_duration>0:
+                        percentage = int(current_duration*100/(int(float(total_duration))*1000))
+                        if self.progress_callback:
+                            self.progress_callback(info, media_file_display_name, percentage, start_time)
 
-                if rec.AcceptWaveform(data):
-                    result = json.loads(rec.Result())
+            if self.progress_callback:
+                self.progress_callback(info, media_file_display_name, 100, start_time)
 
-                    if result["text"] and absolute_start_time:
-                        text = result["text"]
+            temp.close()
 
-                        if len(text) > 0:
-                            main_window.write_event_value('-EVENT-RESULTS-', text)
-                            transcriptions.append(text)
+            return temp.name, self.rate
 
-                            f += 1
-                            p = 0
+        except KeyboardInterrupt:
+            if self.error_messages_callback:
+                self.error_messages_callback("Cancelling all tasks")
+            else:
+                print("Cancelling all tasks")
+            return
 
-                            absolute_end_time = datetime.now()
-                            end_time = start_time + (absolute_end_time - absolute_start_time)
-                            regions.append((start_time.total_seconds(), end_time.total_seconds()))
+        except Exception as e:
+            if self.error_messages_callback:
+                self.error_messages_callback(e)
+            else:
+                print(e)
+            return
 
-                            #start_time_str = "{:02d}:{:02d}:{:06.3f}".format(
-                            start_time_str = "{:02d}:{:02d}:{:02.0f}.{:03.0f}".format(
-                                start_time.seconds // 3600,  # hours
-                                (start_time.seconds // 60) % 60,  # minutes
-                                start_time.seconds % 60, # seconds
-                                start_time.microseconds / 1000000  # microseconds
-                            )
 
-                            #end_time_str = "{:02d}:{:02d}:{:06.3f}".format(
-                            end_time_str = "{:02d}:{:02d}:{:02.0f}.{:03.0f}".format(
-                                end_time.seconds // 3600,  # hours
-                                (end_time.seconds // 60) % 60,  # minutes
-                                end_time.seconds % 60, # seconds
-                                end_time.microseconds / 1000000  # microseconds
-                            )
+class VoskRecognizer:
+    def __init__(self, loglevel=-1, language_code="en", block_size=1024, progress_callback=None,  error_messages_callback=None):
+        self.loglevel = loglevel
+        self.language_code = language_code
+        self.block_size = block_size
+        self.progress_callback = progress_callback
+        self.error_messages_callback = error_messages_callback
 
-                            time_stamp_string = start_time_str + "-" + end_time_str
+    def __call__(self, wav_filepath):
+        try:
+            SetLogLevel(self.loglevel)
+            reader = wave.open(wav_filepath)
+            rate = reader.getframerate()
+            total_duration = reader.getnframes() / rate
+            vosk_language = VoskLanguage()
+            model = Model(lang=vosk_language.lang_of_code[self.language_code])
+            rec = KaldiRecognizer(model, rate)
+            rec.SetWords(True)
+            regions = []
+            transcripts = []
+            media_file_display_name = os.path.basename(wav_filepath).split('/')[-1]
+            info = f"Creating '{media_file_display_name}' transcriptions"
+            start_time = time.time()
+        
+            while True:
+                block = reader.readframes(self.block_size)
+                if not block:
+                    break
+                if rec.AcceptWaveform(block):
+                    recResult_json = json.loads(rec.Result())
+                    if 'result' in recResult_json:
+                        result = recResult_json["result"]
+                        text = recResult_json["text"]
+                        region_start_time = result[0]["start"]
+                        region_end_time = result[len(result)-1]["end"]
+                        progress = int(int(region_end_time)*100/total_duration)
+                        regions.append((region_start_time, region_end_time))
+                        transcripts.append(text)
+                        if self.progress_callback:
+                            self.progress_callback(info, media_file_display_name, progress, start_time)
 
-                            tmp_src_txt_transcription_filename = "record.txt"
-                            tmp_src_txt_transcription_filepath = os.path.join(tempfile.gettempdir(), tmp_src_txt_transcription_filename)
-                            tmp_src_txt_transcription_file = open(tmp_src_txt_transcription_filepath, "a")
-                            tmp_src_txt_transcription_file.write(time_stamp_string + " " + text + "\n")
-                            tmp_src_txt_transcription_file.close()
+            if self.progress_callback:
+                self.progress_callback(info, media_file_display_name, 100, start_time)
 
-                else:
-                    result = json.loads(rec.PartialResult())
-                    if result["partial"]:
-                        text = result["partial"]
+            return regions, transcripts
 
-                        if len(text) == 0:
-                            main_window.write_event_value('-EVENT-NULL-RESULTS-', text)
+        except KeyboardInterrupt:
+            if self.error_messages_callback:
+                self.error_messages_callback("Cancelling all tasks")
+            else:
+                print("Cancelling all tasks")
+            return
 
-                        if len(text)>0:
-                            main_window.write_event_value('-EVENT-PARTIAL-RESULTS-', text)
-
-                            # IF RECORD STREAMING
-                            if main_window['-URL-'].get() != (None or "") and main_window['-RECORD-STREAMING-'].get() == True:
-
-                                if ffmpeg_start_run_time and l == 0:
-
-                                    loading_time = datetime.now() - ffmpeg_start_run_time - (ffmpeg_start_run_time - get_tmp_recorded_streaming_filepath_time)
-                                    if first_streaming_duration_recorded:
-
-                                        # A ROUGH GUESS OF THE FIRST PARTIAL RESULT START TIME
-                                        # ACTUAL START TIME WILL BE PROVIED BY vosk_transcribe() FUNCTION
-                                        #start_time = first_streaming_duration_recorded
-                                        #start_time = first_streaming_duration_recorded + loading_time
-
-                                        start_time = first_streaming_duration_recorded + timedelta(seconds=0.5)
-
-                                        # MAKE SURE THAT IT'S EXECUTED ONLY ONCE
-                                        l += 1
-
-                                    else:
-                                        time_value_filename = "time_value"
-                                        time_value_filepath = os.path.join(tempfile.gettempdir(), time_value_filename)
-                                        #print("time_value_filepath = {}".format(time_value_filepath))
-                                        #print("os.path.isfile(time_value_filepath) = {}".format(os.path.isfile(time_value_filepath)))
-                                        if os.path.isfile(time_value_filepath):
-                                            time_value_file = open(time_value_filepath, "r")
-                                            time_value_string = time_value_file.read()
-                                            if time_value_string:
-                                                first_streaming_duration_recorded = datetime.strptime(time_value_string, "%H:%M:%S.%f") - datetime(1900, 1, 1)
-                                            else:
-                                                first_streaming_duration_recorded = None
-                                            time_value_file.close()
-
-                                else:
-                                    if p == 0:
-                                        absolute_start_time = datetime.now()
-
-                                        if end_time:
-                                            start_time = end_time
-                                        p += 1
-
-                            # NOT RECORD STREAMING
-                            else:
-                                if l == 0:
-                                    now_datetime = datetime.now()
-                                    now_time = now_datetime.time()
-                                    now_microseconds = (now_time.hour * 3600 + now_time.minute * 60 + now_time.second) * 1000000 + now_time.microsecond
-
-                                    start_time = timedelta(microseconds=now_microseconds)
-
-                                    l += 1
-
-                                else:
-                                    if p == 0:
-                                        absolute_start_time = datetime.now()
-
-                                        if end_time:
-                                            start_time = end_time
-                                        p += 1
-
-                if dump_fn is not None:
-                    dump_fn.write(data)
-
-    except KeyboardInterrupt:
-        recognizing==False
-        rec = None
-        data = None
-        parser.exit(0)
-
-    except Exception as e:
-        parser.exit(type(e).__name__ + ": " + str(e))
+        except Exception as e:
+            if self.error_messages_callback:
+                self.error_messages_callback(e)
+            else:
+                print(e)
 
 
 class SentenceTranslator(object):
@@ -1268,6 +1506,341 @@ class SentenceTranslator(object):
             return
 
 
+class SubtitleFormatter:
+    supported_formats = ['srt', 'vtt', 'json', 'raw']
+
+    def __init__(self, format_type, error_messages_callback=None):
+        self.format_type = format_type.lower()
+        self.error_messages_callback = error_messages_callback
+        
+    def __call__(self, subtitles, padding_before=0, padding_after=0):
+        try:
+            if self.format_type == 'srt':
+                return self.srt_formatter(subtitles, padding_before, padding_after)
+            elif self.format_type == 'vtt':
+                return self.vtt_formatter(subtitles, padding_before, padding_after)
+            elif self.format_type == 'json':
+                return self.json_formatter(subtitles)
+            elif self.format_type == 'raw':
+                return self.raw_formatter(subtitles)
+            else:
+                if error_messages_callback:
+                    error_messages_callback(f'Unsupported format type: {self.format_type}')
+                else:
+                    raise ValueError(f'Unsupported format type: {self.format_type}')
+
+        except KeyboardInterrupt:
+            if self.error_messages_callback:
+                self.error_messages_callback("Cancelling all tasks")
+            else:
+                print("Cancelling all tasks")
+            return
+
+        except Exception as e:
+            if self.error_messages_callback:
+                self.error_messages_callback(e)
+            else:
+                print(e)
+            return
+
+    def srt_formatter(self, subtitles, padding_before=0, padding_after=0):
+        """
+        Serialize a list of subtitles according to the SRT format, with optional time padding.
+        """
+        sub_rip_file = pysrt.SubRipFile()
+        for i, ((start, end), text) in enumerate(subtitles, start=1):
+            item = pysrt.SubRipItem()
+            item.index = i
+            item.text = six.text_type(text)
+            item.start.seconds = max(0, start - padding_before)
+            item.end.seconds = end + padding_after
+            sub_rip_file.append(item)
+        return '\n'.join(six.text_type(item) for item in sub_rip_file)
+
+    def vtt_formatter(self, subtitles, padding_before=0, padding_after=0):
+        """
+        Serialize a list of subtitles according to the VTT format, with optional time padding.
+        """
+        text = self.srt_formatter(subtitles, padding_before, padding_after)
+        text = 'WEBVTT\n\n' + text.replace(',', '.')
+        return text
+
+    def json_formatter(self, subtitles):
+        """
+        Serialize a list of subtitles as a JSON blob.
+        """
+        subtitle_dicts = [
+            {
+                'start': start,
+                'end': end,
+                'content': text,
+            }
+            for ((start, end), text)
+            in subtitles
+        ]
+        return json.dumps(subtitle_dicts)
+
+    def raw_formatter(self, subtitles):
+        """
+        Serialize a list of subtitles as a newline-delimited string.
+        """
+        return ' '.join(text for (_rng, text) in subtitles)
+
+
+class SubtitleWriter:
+    def __init__(self, regions, transcripts, format, error_messages_callback=None):
+        self.regions = regions
+        self.transcripts = transcripts
+        self.format = format
+        self.timed_subtitles = [(r, t) for r, t in zip(self.regions, self.transcripts) if t]
+        self.error_messages_callback = error_messages_callback
+
+    def get_timed_subtitles(self):
+        return self.timed_subtitles
+
+    def write(self, declared_subtitle_filepath):
+        try:
+            formatter = SubtitleFormatter(self.format)
+            formatted_subtitles = formatter(self.timed_subtitles)
+            saved_subtitle_filepath = declared_subtitle_filepath
+            if saved_subtitle_filepath:
+                subtitle_file_base, subtitle_file_ext = os.path.splitext(saved_subtitle_filepath)
+                if not subtitle_file_ext:
+                    saved_subtitle_filepath = "{base}.{format}".format(base=subtitle_file_base, format=self.format)
+                else:
+                    saved_subtitle_filepath = declared_subtitle_filepath
+            with open(saved_subtitle_filepath, 'wb') as f:
+                f.write(formatted_subtitles.encode("utf-8"))
+
+        except KeyboardInterrupt:
+            if self.error_messages_callback:
+                self.error_messages_callback("Cancelling all tasks")
+            else:
+                print("Cancelling all tasks")
+            return
+
+        except Exception as e:
+            if self.error_messages_callback:
+                self.error_messages_callback(e)
+            else:
+                print(e)
+            return
+
+
+#----------------------------------------------------------- MISC FUNCTIONS ------------------------------------------------------------#
+
+
+def change_code_page(code_page):
+    kernel32 = ctypes.windll.kernel32
+    kernel32.SetConsoleOutputCP(code_page)
+    kernel32.SetConsoleCP(code_page)
+
+
+def int_or_str(text):
+    """Helper function for argument parsing."""
+    try:
+        return int(text)
+    except ValueError:
+        return text
+
+
+def callback(indata, frames, time, status):
+    """This is called (from a separate thread) for each audio block."""
+    if status:
+        print(status, file=sys.stderr)
+    q.put(bytes(indata))
+
+
+def worker_recognize(src, dst, error_messages_callback=None):
+    global main_window, recognizing, text, Device, SampleRate, wav_filepath, regions, transcriptions, \
+        start_button_click_time, ffmpeg_start_run_time, tmp_recorded_streaming_filepath, get_tmp_recorded_streaming_filepath_time, \
+        loading_time, first_streaming_duration_recorded
+
+    p = 0
+    f = 0
+    l = 0
+
+    start_time = None
+    end_time = None
+    first_streaming_duration_recorded = None
+    absolute_start_time = None
+    audio_filename, SampleRate = None, None
+    first_regions = None
+    model = None
+
+    time_value_filename = "time_value"
+    time_value_filepath = os.path.join(tempfile.gettempdir(), time_value_filename)
+    #print("time_value_filepath = {}".format(time_value_filepath))
+    #print("os.path.isfile(time_value_filepath) = {}".format(os.path.isfile(time_value_filepath)))
+    if os.path.isfile(time_value_filepath):
+        time_value_file = open(time_value_filepath, "r")
+        time_value_string = time_value_file.read()
+        if time_value_string:
+            first_streaming_duration_recorded = datetime.strptime(time_value_string, "%H:%M:%S.%f") - datetime(1900, 1, 1)
+        else:
+            first_streaming_duration_recorded = None
+        time_value_file.close()
+
+    try:
+        if SampleRate is None:
+            #soundfile expects an int, sounddevice provides a float:
+            device_info = sd.query_devices(Device, "input")
+            #print(f"device_info = {device_info}")
+            SampleRate = int(device_info["default_samplerate"])
+            #print(f"SampleRate = {SampleRate}")
+
+        if wav_filepath:
+            dump_fn = open(wav_filepath, "wb")
+        else:
+            dump_fn = None
+
+        vosk_language = VoskLanguage()
+        model = Model(lang=vosk_language.lang_of_code[src])
+
+        with sd.RawInputStream(samplerate=SampleRate, blocksize=8192, device=Device, dtype="int16", channels=1, callback=callback):
+
+            rec = KaldiRecognizer(model, SampleRate)
+
+            while recognizing:
+                if not recognizing:
+                    rec = None
+                    data = None
+                    result = None
+                    results_text = None
+                    partial_results_text = None
+                    break
+
+                data = q.get()
+
+                results_text = ''
+                partial_results_text = ''
+
+                if rec.AcceptWaveform(data):
+                    result = json.loads(rec.Result())
+
+                    if result["text"] and absolute_start_time:
+                        text = result["text"]
+
+                        if len(text) > 0:
+                            main_window.write_event_value('-EVENT-RESULTS-', text)
+                            transcriptions.append(text)
+
+                            f += 1
+                            p = 0
+
+                            absolute_end_time = datetime.now()
+                            end_time = start_time + (absolute_end_time - absolute_start_time)
+                            regions.append((start_time.total_seconds(), end_time.total_seconds()))
+
+                            start_time_str = "{:02d}:{:02d}:{:02.0f}.{:03.0f}".format(
+                                start_time.seconds // 3600,  # hours
+                                (start_time.seconds // 60) % 60,  # minutes
+                                start_time.seconds % 60, # seconds
+                                start_time.microseconds / 1000000  # microseconds
+                            )
+
+                            end_time_str = "{:02d}:{:02d}:{:02.0f}.{:03.0f}".format(
+                                end_time.seconds // 3600,  # hours
+                                (end_time.seconds // 60) % 60,  # minutes
+                                end_time.seconds % 60, # seconds
+                                end_time.microseconds / 1000000  # microseconds
+                            )
+
+                            time_stamp_string = start_time_str + "-" + end_time_str
+
+                            tmp_src_txt_transcription_filename = f"record.{src}.txt"
+                            tmp_src_txt_transcription_filepath = os.path.join(tempfile.gettempdir(), tmp_src_txt_transcription_filename)
+                            tmp_src_txt_transcription_file = open(tmp_src_txt_transcription_filepath, "a")
+                            tmp_src_txt_transcription_file.write(time_stamp_string + " " + text + "\n")
+                            tmp_src_txt_transcription_file.close()
+
+                else:
+                    result = json.loads(rec.PartialResult())
+                    if result["partial"]:
+                        text = result["partial"]
+
+                        if len(text) == 0:
+                            main_window.write_event_value('-EVENT-NULL-RESULTS-', text)
+
+                        if len(text)>0:
+                            main_window.write_event_value('-EVENT-PARTIAL-RESULTS-', text)
+
+                            # IF RECORD STREAMING
+                            if main_window['-URL-'].get() != (None or "") and main_window['-RECORD-STREAMING-'].get() == True:
+
+                                if ffmpeg_start_run_time and l == 0:
+
+                                    loading_time = datetime.now() - ffmpeg_start_run_time - (ffmpeg_start_run_time - get_tmp_recorded_streaming_filepath_time)
+                                    if first_streaming_duration_recorded:
+
+                                        # A ROUGH GUESS OF THE FIRST PARTIAL RESULT START TIME
+                                        # ACTUAL START TIME WILL BE PROVIED BY vosk_transcribe() FUNCTION
+                                        #start_time = first_streaming_duration_recorded
+                                        #start_time = first_streaming_duration_recorded + loading_time
+
+                                        start_time = first_streaming_duration_recorded + timedelta(seconds=0.5)
+
+                                        # MAKE SURE THAT IT'S EXECUTED ONLY ONCE
+                                        l += 1
+
+                                    else:
+                                        time_value_filename = "time_value"
+                                        time_value_filepath = os.path.join(tempfile.gettempdir(), time_value_filename)
+                                        #print("time_value_filepath = {}".format(time_value_filepath))
+                                        #print("os.path.isfile(time_value_filepath) = {}".format(os.path.isfile(time_value_filepath)))
+                                        if os.path.isfile(time_value_filepath):
+                                            time_value_file = open(time_value_filepath, "r")
+                                            time_value_string = time_value_file.read()
+                                            if time_value_string:
+                                                first_streaming_duration_recorded = datetime.strptime(time_value_string, "%H:%M:%S.%f") - datetime(1900, 1, 1)
+                                            else:
+                                                first_streaming_duration_recorded = None
+                                            time_value_file.close()
+
+                                else:
+                                    if p == 0:
+                                        absolute_start_time = datetime.now()
+
+                                        if end_time:
+                                            start_time = end_time
+                                        p += 1
+
+                            # NOT RECORD STREAMING
+                            else:
+                                if l == 0:
+                                    now_datetime = datetime.now()
+                                    now_time = now_datetime.time()
+                                    now_microseconds = (now_time.hour * 3600 + now_time.minute * 60 + now_time.second) * 1000000 + now_time.microsecond
+
+                                    start_time = timedelta(microseconds=now_microseconds)
+
+                                    l += 1
+
+                                else:
+                                    if p == 0:
+                                        absolute_start_time = datetime.now()
+
+                                        if end_time:
+                                            start_time = end_time
+                                        p += 1
+
+                if dump_fn is not None:
+                    dump_fn.write(data)
+
+    except KeyboardInterrupt:
+        recognizing==False
+        rec = None
+        data = None
+        #sys.exit(0)
+
+    except Exception as e:
+        if error_messages_callback:
+            error_messages_callback(e)
+        else:
+            print(e)
+        #sys.exit(type(e).__name__ + ": " + str(e))
+
+'''
 def GoogleTranslate(text, src, dst, timeout=30, error_messages_callback=None):
     url = 'https://translate.googleapis.com/translate_a/'
     params = 'single?client=gtx&sl='+src+'&tl='+dst+'&dt=t&q='+text;
@@ -1309,7 +1882,7 @@ def GoogleTranslate(text, src, dst, timeout=30, error_messages_callback=None):
         else:
             print(e)
         return
-
+'''
 
 def worker_timed_translate(src, dst):
     global main_window, recognizing
@@ -1323,9 +1896,11 @@ def worker_timed_translate(src, dst):
             partial_result_file = open(partial_result_filepath, "r")
             partial_result = partial_result_file.read()
 
+            sentence_translator = SentenceTranslator(src=src, dst=dst, error_messages_callback=show_error_messages)
             n_words = len(partial_result.split())
             if partial_result and n_words % 3 == 0:
-                translated_text = GoogleTranslate(partial_result, src, dst, error_messages_callback=show_error_messages)
+                #translated_text = GoogleTranslate(partial_result, src, dst, error_messages_callback=show_error_messages)
+                translated_text = sentence_translator(partial_result)
                 main_window.write_event_value('-EVENT-VOICE-TRANSLATED-', translated_text)
 
 
@@ -1416,7 +1991,7 @@ def is_valid_url(url):
 
 
 def record_streaming_windows(hls_url, filename):
-    global ffmpeg_start_run_time, first_streaming_duration_recorded, recognizing, main_window
+    global main_window, ffmpeg_start_run_time, first_streaming_duration_recorded, recognizing
 
     #ffmpeg_cmd = ['ffmpeg', '-y', '-i', hls_url,  '-movflags', '+frag_keyframe+separate_moof+omit_tfhd_offset+empty_moov', '-fflags', 'nobuffer', '-loglevel', 'error',  f'{filename}']
     ffmpeg_cmd = ['ffmpeg', '-y', '-i', f'{hls_url}',  '-movflags', '+frag_keyframe+separate_moof+omit_tfhd_offset+empty_moov', '-fflags', 'nobuffer', f'{filename}']
@@ -1475,7 +2050,7 @@ def record_streaming_windows(hls_url, filename):
 
 # subprocess.Popen(ffmpeg_cmd) THREAD BEHAVIOR IS DIFFERENT IN LINUX
 def record_streaming_linux(url, output_file):
-    global recognizing, ffmpeg_start_run_time, first_streaming_duration_recorded, main_window
+    global main_window, recognizing, ffmpeg_start_run_time, first_streaming_duration_recorded
 
     #ffmpeg_cmd = ['ffmpeg', '-y', '-i', url, '-c', 'copy', '-bsf:a', 'aac_adtstoasc', '-f', 'mp4', output_file]
     ffmpeg_cmd = ['ffmpeg', '-y', '-i', f'{url}',  '-movflags', '+frag_keyframe+separate_moof+omit_tfhd_offset+empty_moov', '-fflags', 'nobuffer', f'{output_file}']
@@ -1679,102 +2254,161 @@ def is_same_language(lang1, lang2):
     return lang1.split("-")[0] == lang2.split("-")[0]
 
 
-def which(program):
-    """
-    Return the path for a given executable.
-    """
-    def is_exe(file_path):
-        """
-        Checks whether a file is executable.
-        """
-        return os.path.isfile(file_path) and os.access(file_path, os.X_OK)
+def extract_audio(media_filepath, n_channels=1, rate=48000):
+    global main_window, not_transcribing
 
-    fpath, _ = os.path.split(program)
-    if fpath:
-        if is_exe(program):
-            return program
-    else:
-        for path in os.environ["PATH"].split(os.pathsep):
-            path = path.strip('"')
-            exe_file = os.path.join(path, program)
-            if is_exe(exe_file):
-                return exe_file
-    return None
+    def which(program):
+        def is_exe(file_path):
+            return os.path.isfile(file_path) and os.access(file_path, os.X_OK)
+        fpath, _ = os.path.split(program)
+        if fpath:
+            if is_exe(program):
+                return program
+        else:
+            for path in os.environ["PATH"].split(os.pathsep):
+                path = path.strip('"')
+                exe_file = os.path.join(path, program)
+                if is_exe(exe_file):
+                    return exe_file
+        return None
 
+    def ffprobe_check():
+        if WavConverter.which("ffprobe"):
+            return "ffprobe"
+        if WavConverter.which("ffprobe.exe"):
+            return "ffprobe.exe"
+        return None
 
-def ffmpeg_check():
-    """
-    Return the ffmpeg executable name. "None" returned when no executable exists.
-    """
-    if which("ffmpeg"):
-        return "ffmpeg"
-    if which("ffmpeg.exe"):
-        return "ffmpeg.exe"
-    return None
-
-
-def extract_audio(filename, n_channels=1, rate=16000):
-    global not_transcribing, main_window
+    def ffmpeg_check():
+        if WavConverter.which("ffmpeg"):
+            return "ffmpeg"
+        if WavConverter.which("ffmpeg.exe"):
+            return "ffmpeg.exe"
+        return None
 
     if not_transcribing: return
 
     temp = tempfile.NamedTemporaryFile(suffix='.wav', delete=False)
 
-    if not os.path.isfile(filename):
-        #print("The given file does not exist: {0}".format(filename))
-        #raise Exception("Invalid filepath: {0}".format(filename))
+    if "\\" in media_filepath:
+        media_filepath = media_filepath.replace("\\", "/")
+
+    if not os.path.isfile(media_filepath):
         not_transcribing=True
         window_key = '-OUTPUT-MESSAGES-'
-        msg = "The given file does not exist: {0}".format(filename)
+        msg = f"The given file does not exist: '{media_filepath}'"
+        append_flag = True
+        main_window.write_event_value('-EVENT-TRANSCRIBE-SEND-MESSAGES-', (window_key, msg, append_flag))
+
+    if not ffprobe_check():
+        not_transcribing=True
+        window_key = '-OUTPUT-MESSAGES-'
+        msg = 'ffprobe executable is not found'
         append_flag = True
         main_window.write_event_value('-EVENT-TRANSCRIBE-SEND-MESSAGES-', (window_key, msg, append_flag))
 
     if not ffmpeg_check():
-        #print("ffmpeg: Executable not found on machine.")
-        #raise Exception("Dependency not found: ffmpeg")
         not_transcribing=True
         window_key = '-OUTPUT-MESSAGES-'
-        msg = 'ffmpeg: Executable not found on machine'
+        msg = 'ffmpeg executable is not found'
         append_flag = True
         main_window.write_event_value('-EVENT-TRANSCRIBE-SEND-MESSAGES-', (window_key, msg, append_flag))
 
-    #command = ["ffmpeg", "-y", "-i", filename, "-ac", f'{str(n_channels)}', "-ar", f"{str(rate)}", "-loglevel", "error", temp.name]
-    command = ["ffmpeg", "-y", "-i", filename, "-ac", str(n_channels), "-ar", str(rate), "-loglevel", "-1", temp.name]
-    ff = FfmpegProgress(command)
-    file_display_name = os.path.basename(filename).split('/')[-1]
+    ffmpeg_command = [
+                        'ffmpeg',
+                        '-hide_banner',
+                        '-loglevel', 'error',
+                        '-v', 'error',
+                        '-y',
+                        '-i', media_filepath,
+                        '-ac', str(channels),
+                        '-ar', str(rate),
+                        '-progress', '-', '-nostats',
+                        temp.name
+                     ]
+
+    media_file_display_name = os.path.basename(media_filepath).split('/')[-1]
 
     try:
-        info = 'Converting {} to a temporary WAV file'.format(file_display_name)
+        info = f"Converting '{media_file_display_name}' to a temporary WAV file"
         total = 100
-        for progress in ff.run_command_with_progress():
-            percentage = f'{progress}%'
-            main_window.write_event_value('-EVENT-TRANSCRIBE-UPDATE-PROGRESS-BAR-', (info, percentage, progress))
-        main_window.write_event_value('-EVENT-TRANSCRIBE-UPDATE-PROGRESS-BAR-', (info, "100%", 100))
-        time.sleep(1)
+        start_time = time.time()
+
+        ffprobe_command = [
+                            'ffprobe',
+                            '-hide_banner',
+                            '-v', 'error',
+                            '-loglevel', 'error',
+                            '-show_entries',
+                            'format=duration',
+                            '-of', 'default=noprint_wrappers=1:nokey=1',
+                            media_filepath
+                          ]
+
+        ffprobe_process = None
+        if sys.platform == "win32":
+            ffprobe_process = subprocess.check_output(ffprobe_command, stdin=open(os.devnull), universal_newlines=True, shell=True, creationflags=subprocess.CREATE_NO_WINDOW)
+        else:
+            ffprobe_process = subprocess.check_output(ffprobe_command, stdin=open(os.devnull), universal_newlines=True)
+
+        total_duration = float(ffprobe_process.strip())
+
+        process = None
+        if sys.platform == "win32":
+            process = subprocess.Popen(ffmpeg_command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=True, creationflags=subprocess.CREATE_NO_WINDOW)
+        else:
+            process = subprocess.Popen(ffmpeg_command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+
+        while True:
+            if process.stdout is None:
+                continue
+
+            stderr_line = (process.stdout.readline().decode("utf-8", errors="replace").strip())
+ 
+            if stderr_line == '' and process.poll() is not None:
+                break
+
+            if "out_time=" in stderr_line:
+                time_str = stderr_line.split('time=')[1].split()[0]
+                current_duration = sum(float(x) * 1000 * 60 ** i for i, x in enumerate(reversed(time_str.split(":"))))
+
+                if current_duration>0:
+                    progress = int(current_duration*100/(int(float(total_duration))*1000))
+                    percentage = f'{progress}%'
+                    if progress > 0:
+                        elapsed_time = time.time() - start_time
+                        eta_seconds = (elapsed_time / progress) * (total - progress)
+                    else:
+                        eta_seconds = 0
+
+                    eta_time = timedelta(seconds=int(eta_seconds))
+                    eta_str = str(eta_time)
+                    hour, minute, second = eta_str.split(":")
+                    time_str = "ETA  : " + hour.zfill(2) + ":" + minute + ":" + second
+                    main_window.write_event_value('-EVENT-TRANSCRIBE-UPDATE-PROGRESS-BAR-', (media_file_display_name, info, total, percentage, progress, time_str))
+
+        elapsed_time = time.time() - start_time
+        elapsed_time_seconds = timedelta(seconds=int(elapsed_time))
+        elapsed_time_str = str(elapsed_time_seconds)
+        hour, minute, second = elapsed_time_str.split(":")
+        time_str = "Time : " + hour.zfill(2) + ":" + minute + ":" + second
+        main_window.write_event_value('-EVENT-TRANSCRIBE-UPDATE-PROGRESS-BAR-', (media_file_display_name, info, total, percentage, progress, time_str))
 
     except Exception as e:
         not_transcribing = True
         msg = [e, n_channels, str(n_channels)]
-        sg.Popup(msg, title="Info", line_width=50)
+        sg.Popup(msg, title="Error", line_width=50)
         main_window.write_event_value('-EXCEPTION-', e)
 
     if not_transcribing: return
 
-    if sys.platform == "win32":
-        subprocess.check_output(command, stdin=open(os.devnull), creationflags=subprocess.CREATE_NO_WINDOW)
-    else:
-        subprocess.check_output(command, stdin=open(os.devnull))
+    temp.close()
 
     return temp.name, rate
 
 
 class NoConsoleProcess(multiprocessing.Process):
     def __init__(self, *args, **kwargs):
-        '''
-        if hasattr(multiprocessing, 'get_all_start_methods') and 'spawn' in multiprocessing.get_all_start_methods():
-            # If running on Windows
-            kwargs['start_method'] = 'spawn'
-        '''
         super().__init__(*args, **kwargs)
         self.queue = multiprocessing.Queue()
 
@@ -1789,26 +2423,26 @@ class NoConsoleProcess(multiprocessing.Process):
             self.queue.put(('done', None))
 
 
-def vosk_transcribe(src, dst, video_filepath, subtitle_format):
-    global all_transcribe_threads, thread_vosk_transcribe, not_transcribing, main_window, regions, transcriptions, \
-        created_regions, created_subtitles, translated_transcriptions, saved_src_subtitle_filepath, saved_dst_subtitle_filepath, \
-        subtitle_filepath, subtitle_file_extension
+def vosk_transcribe(src, dst, media_filepath, subtitle_format):
+    global main_window, all_transcribe_threads, thread_vosk_transcribe, not_transcribing, regions, transcriptions, \
+        created_regions, created_subtitles, translated_transcriptions, saved_src_subtitle_filepath, saved_dst_subtitle_filepath
 
-    if not os.path.isfile(video_filepath):
+    if not os.path.isfile(media_filepath):
         FONT = ("Helvetica", 10)
         sg.set_options(font=FONT)
-        sg.Popup("{} is not exist!".format(video_filepath), title="Info", line_width=50)
+        sg.Popup(f"'{media_filepath}' is not exist!", title="Error", line_width=50)
         return
 
     if not_transcribing: return
 
+    media_file_display_name = os.path.basename(media_filepath).split('/')[-1]
+
     pool = multiprocessing.Pool(10, initializer=NoConsoleProcess)
     wav_filepath = None
     SampleRate = None
-    subtitle_file = None
-    translated_subtitle_file = None
-    file_display_name = os.path.basename(video_filepath).split('/')[-1]
-    file_display_name = os.path.basename(video_filepath).split('/')[-1]
+    src_subtitle_file = None
+    dst_subtitle_file = None
+    google_language = GoogleLanguage()
 
     if not_transcribing: return
 
@@ -1816,21 +2450,29 @@ def vosk_transcribe(src, dst, video_filepath, subtitle_format):
     main_window.write_event_value('-EVENT-TRANSCRIBE-SHOW-PROGRESS-BAR-', False)
 
     window_key = '-OUTPUT-MESSAGES-'
-    msg = "Processing {} :\n".format(file_display_name)
+    msg = f"Processing '{media_file_display_name}' :\n"
     append_flag = True
     main_window.write_event_value('-EVENT-TRANSCRIBE-SEND-MESSAGES-', (window_key, msg, append_flag))
 
     window_key = '-OUTPUT-MESSAGES-'
-    msg = "Converting {} to a temporary WAV file...\n".format(file_display_name)
+    msg = f"Converting '{media_file_display_name}' to a temporary WAV file...\n"
     append_flag = True
     main_window.write_event_value('-EVENT-TRANSCRIBE-SEND-MESSAGES-', (window_key, msg, append_flag))
     main_window.write_event_value('-EVENT-TRANSCRIBE-SHOW-PROGRESS-BAR-', True)
 
-    info = 'Converting {} to a temporary WAV file'.format(file_display_name)
+    info = f"Converting '{media_file_display_name}' to a temporary WAV file"
     total = 100
-    main_window.write_event_value('-EVENT-TRANSCRIBE-UPDATE-PROGRESS-BAR-', (info, "0%", 0))
+    time_str = "ETA  : --:--:--"
+    main_window.write_event_value('-EVENT-TRANSCRIBE-UPDATE-PROGRESS-BAR-', (media_file_display_name, info, total, "0%", 0, time_str))
 
-    wav_filepath, SampleRate = extract_audio(video_filepath)
+    wav_converter = WavConverter(progress_callback=show_progress, error_messages_callback=show_error_messages)
+    wav_filepath, SampleRate = wav_converter(media_filepath)
+
+    window_key = '-OUTPUT-MESSAGES-'
+    msg = f"'{media_file_display_name}' temporary WAV file saved as:\n  '{wav_filepath}'\n"
+    append_flag = True
+    main_window.write_event_value('-EVENT-TRANSCRIBE-SEND-MESSAGES-', (window_key, msg, append_flag))
+    main_window.write_event_value('-EVENT-TRANSCRIBE-SHOW-PROGRESS-BAR-', True)
 
     if not_transcribing: return
 
@@ -1845,65 +2487,12 @@ def vosk_transcribe(src, dst, video_filepath, subtitle_format):
     if os.path.isfile(wav_filepath):
 
         window_key = '-OUTPUT-MESSAGES-'
-        msg = 'Creating {} transcriptions...\n'.format(file_display_name)
+        msg = f"Creating '{media_file_display_name}' transcriptions...\n"
         append_flag = True
         main_window.write_event_value('-EVENT-TRANSCRIBE-SEND-MESSAGES-', (window_key, msg, append_flag))
 
-        SetLogLevel(-1)
-        SampleRate = 16000
-        model = Model(lang = src)
-        rec = KaldiRecognizer(model, SampleRate)
-        rec.SetWords(True)
-        block_size = 4096
-
-        try:
-            reader = wave.open(wav_filepath)
-            rate = reader.getframerate()
-
-        except Exception as e:
-            not_transcribing = True
-            sg.Popup(e, title="Info", line_width=50)
-
-        total_duration = reader.getnframes() / rate
-
-        info = 'Creating {} transcriptions'.format(file_display_name)
-        total = 100
-        main_window.write_event_value('-EVENT-TRANSCRIBE-UPDATE-PROGRESS-BAR-', (info, "0%", 0))
-
-        while True:
-
-            block = reader.readframes(block_size)
-
-            if not block:
-                break
-
-            if rec.AcceptWaveform(block):
-
-                recResult_json = json.loads(rec.Result())
-
-                if 'result' in recResult_json:
-
-                    result = recResult_json["result"]
-
-                    text = recResult_json["text"]
-
-                    transcriptions.append(text)
-
-                    start_time = result[0]["start"]
-
-                    progress = int(start_time*100/total_duration)
-                    percentage = f'{progress}%'
-                    main_window.write_event_value('-EVENT-TRANSCRIBE-UPDATE-PROGRESS-BAR-', (info, percentage, progress))
-
-                    end_time = result[len(result)-1]["end"]
-
-                    progress = int(end_time*100/total_duration)
-                    percentage = f'{progress}%'
-                    main_window.write_event_value('-EVENT-TRANSCRIBE-UPDATE-PROGRESS-BAR-', (info, percentage, progress))
-
-                    regions.append((start_time, end_time))
-
-        main_window.write_event_value('-EVENT-TRANSCRIBE-UPDATE-PROGRESS-BAR-', (info, "100%", total))
+        vosk_recognizer = VoskRecognizer(loglevel=-1, language_code=src, block_size=4096, progress_callback=show_progress)
+        regions, transcriptions = vosk_recognizer(wav_filepath)
 
         regions_filename = "regions"
         regions_filepath = os.path.join(tempfile.gettempdir(), regions_filename)
@@ -1919,27 +2508,20 @@ def vosk_transcribe(src, dst, video_filepath, subtitle_format):
 
         if not_transcribing: return
 
-        timed_subtitles = [(r, t) for r, t in zip(regions, transcriptions) if t]
-        formatter = FORMATTERS.get(subtitle_format)
-        formatted_subtitles = formatter(timed_subtitles)
-
-        base, ext = os.path.splitext(video_filepath)
-        subtitle_file = "{base}.{format}".format(base=base, format=subtitle_format)
+        base, ext = os.path.splitext(media_filepath)
+        src_subtitle_filepath = f"{base}.{src}.{subtitle_format}"
 
         if not_transcribing: return
 
-        with open(subtitle_file, 'wb') as f:
-            f.write(formatted_subtitles.encode("utf-8"))
-            f.close()
-
-        with open(subtitle_file, 'a') as f:
-            f.write("\n")
-            f.close()
+        writer = SubtitleWriter(regions, transcriptions, subtitle_format, error_messages_callback=show_error_messages)
+        writer.write(src_subtitle_filepath)
 
         if not_transcribing: return
 
         if (not is_same_language(src, dst)):
-            translated_subtitle_file = subtitle_file[ :-4] + '.translated.' + subtitle_format
+            timed_subtitles = writer.timed_subtitles
+
+            dst_subtitle_filepath = f"{base}.{dst}.{subtitle_format}"
 
             if not_transcribing: return
 
@@ -1950,13 +2532,17 @@ def vosk_transcribe(src, dst, video_filepath, subtitle_format):
             if not_transcribing: return
 
             window_key = '-OUTPUT-MESSAGES-'
-            msg = 'Translating {} subtitles from {} to {} ...\n'.format(file_display_name, src, dst)
+            msg = f"Translating '{media_file_display_name}' subtitles from '{google_language.name_of_code[src]}' ('{src}') to '{google_language.name_of_code[dst]}' ('{dst}') ...\n"
             append_flag = True
             main_window.write_event_value('-EVENT-TRANSCRIBE-SEND-MESSAGES-', (window_key, msg, append_flag))
 
-            info = 'Translating {} subtitles from {} to {}'.format(file_display_name, src, dst)
+            info = f"Translating '{media_file_display_name}' subtitles from '{google_language.name_of_code[src]}' ('{src}') to '{google_language.name_of_code[dst]}' ('{dst}')"
             total = 100
-            main_window.write_event_value('-EVENT-TRANSCRIBE-UPDATE-PROGRESS-BAR-', (info, "0%", 0))
+            time_str = "ETA  : --:--:--"
+
+            start_time = time.time()
+            
+            main_window.write_event_value('-EVENT-TRANSCRIBE-UPDATE-PROGRESS-BAR-', (media_file_display_name, info, total, "0%", 0, time_str))
 
             transcript_translator = SentenceTranslator(src=src, dst=dst, error_messages_callback=show_error_messages)
             translated_transcriptions = []
@@ -1973,46 +2559,55 @@ def vosk_transcribe(src, dst, video_filepath, subtitle_format):
 
                 progress = int(i*100/len(timed_subtitles))
                 percentage = f'{progress}%'
-                main_window.write_event_value('-EVENT-TRANSCRIBE-UPDATE-PROGRESS-BAR-', (info, percentage, progress))
-            main_window.write_event_value('-EVENT-TRANSCRIBE-UPDATE-PROGRESS-BAR-', (info, "100%", total))
+
+                if progress > 0:
+                    elapsed_time = time.time() - start_time
+                    eta_seconds = (elapsed_time / progress) * (total - progress)
+                else:
+                    eta_seconds = 0
+
+                eta_time = timedelta(seconds=int(eta_seconds))
+                eta_str = str(eta_time)
+                hour, minute, second = eta_str.split(":")
+                time_str = "ETA  : " + hour.zfill(2) + ":" + minute + ":" + second
+                main_window.write_event_value('-EVENT-TRANSCRIBE-UPDATE-PROGRESS-BAR-', (media_file_display_name, info, total, percentage, progress, time_str))
+
+            elapsed_time = time.time() - start_time
+            elapsed_time_seconds = timedelta(seconds=int(elapsed_time))
+            elapsed_time_str = str(elapsed_time_seconds)
+            hour, minute, second = elapsed_time_str.split(":")
+            time_str = "Time : " + hour.zfill(2) + ":" + minute + ":" + second
+            main_window.write_event_value('-EVENT-TRANSCRIBE-UPDATE-PROGRESS-BAR-', (media_file_display_name, info, total, "100%", 100, time_str))
 
             if not_transcribing: return
 
-            timed_translated_subtitles = [(r, t) for r, t in zip(created_regions, translated_transcriptions) if t]
-            formatter = FORMATTERS.get(subtitle_format)
-            formatted_translated_subtitles = formatter(timed_translated_subtitles)
-
-            if not_transcribing: return
-
-            with open(translated_subtitle_file, 'wb') as f:
-                f.write(formatted_translated_subtitles.encode("utf-8"))
-            with open(translated_subtitle_file, 'a') as f:
-                f.write("\n")
+            translation_writer = SubtitleWriter(created_regions, translated_transcription, subtitle_format, error_messages_callback=show_error_messages)
+            translation_writer.write(dst_subtitle_filepath)
 
             if not_transcribing: return
 
         window_key = '-OUTPUT-MESSAGES-'
-        msg = "{} temporary subtitles file created at : {}\n".format(file_display_name, subtitle_file)
+        msg = f"'{media_file_display_name}' temporary subtitles file saved as :\n  '{src_subtitle_filepath}'\n"
         append_flag = True
         main_window.write_event_value('-EVENT-TRANSCRIBE-SEND-MESSAGES-', (window_key, msg, append_flag))
 
         if (not is_same_language(src, dst)):
             window_key = '-OUTPUT-MESSAGES-'
-            msg = "{} temporary translated subtitles file created at : {}\n" .format(file_display_name, translated_subtitle_file)
+            msg = f"'{media_file_display_name}' temporary translated subtitles file saved as :\n  '{dst_subtitle_filepath}'\n"
             append_flag = True
             main_window.write_event_value('-EVENT-TRANSCRIBE-SEND-MESSAGES-', (window_key, msg, append_flag))
 
         if not_transcribing: return
 
     window_key = '-OUTPUT-MESSAGES-'
-    msg = 'Saving {} temporary transcriptions text files...\n'.format(file_display_name)
+    msg = f"Saving '{media_file_display_name}' temporary transcriptions text files...\n"
     append_flag = True
     main_window.write_event_value('-EVENT-TRANSCRIBE-SEND-MESSAGES-', (window_key, msg, append_flag))
 
     # SAVING TEMPORARY TRANSCRIPTIONS record.txt AND TRANSLATED TRANSCRIPTIONS record.traslated.txt
-    tmp_src_txt_transcription_filename = "record.txt"
+    tmp_src_txt_transcription_filename = f"record.{src}.txt"
     tmp_src_txt_transcription_filepath = os.path.join(tempfile.gettempdir(), tmp_src_txt_transcription_filename)
-    tmp_dst_txt_transcription_filename = "record.translated.txt"
+    tmp_dst_txt_transcription_filename = f"record.{dst}.txt"
     tmp_dst_txt_transcription_filepath = os.path.join(tempfile.gettempdir(), tmp_dst_txt_transcription_filename)
 
     for i in range(len(created_regions)):
@@ -2045,18 +2640,18 @@ def vosk_transcribe(src, dst, video_filepath, subtitle_format):
             tmp_dst_txt_transcription_file.close()
 
     window_key = '-OUTPUT-MESSAGES-'
-    msg = "{} temporary transcriptions text file created at : {}\n".format(file_display_name, tmp_src_txt_transcription_filepath)
+    msg = f"'{media_file_display_name}' temporary transcriptions text file saved as :\n  '{tmp_src_txt_transcription_filepath}'\n"
     append_flag = True
     main_window.write_event_value('-EVENT-TRANSCRIBE-SEND-MESSAGES-', (window_key, msg, append_flag))
 
     if (not is_same_language(src, dst)):
         window_key = '-OUTPUT-MESSAGES-'
-        msg = "{} temporary translated transcriptions text file created at : {}\n".format(file_display_name, tmp_dst_txt_transcription_filepath)
+        msg = f"'{media_file_display_name}' temporary translated transcriptions text file saved as :\n  '{tmp_dst_txt_transcription_filepath}'\n"
         append_flag = True
         main_window.write_event_value('-EVENT-TRANSCRIBE-SEND-MESSAGES-', (window_key, msg, append_flag))
 
     window_key = '-OUTPUT-MESSAGES-'
-    msg = "Done.\n".format(file_display_name, tmp_src_txt_transcription_filepath)
+    msg = "Done."
     append_flag = True
     main_window.write_event_value('-EVENT-TRANSCRIBE-SEND-MESSAGES-', (window_key, msg, append_flag))
 
@@ -2083,22 +2678,30 @@ def vosk_transcribe(src, dst, video_filepath, subtitle_format):
 
 
 def save_temporary_transcriptions(src, dst, subtitle_format):
-    global thread_save_temporary_transcriptions, main_window, regions, transcriptions, \
+    global main_window, thread_save_temporary_transcriptions, regions, transcriptions, \
         created_regions, created_subtitles, translated_transcriptions
 
-    tmp_src_subtitle_filename = "record" + "." + subtitle_format
+    tmp_src_subtitle_filename = f"record.{src}.{subtitle_format}"
     tmp_src_subtitle_filepath = os.path.join(tempfile.gettempdir(), tmp_src_subtitle_filename)
 
-    # SAVING TRANSCRIPTIONS IN A TEMPORARY SUBTITLE FILE
-    timed_subtitles = [(r, t) for r, t in zip(regions, transcriptions) if t]
-    formatter = FORMATTERS.get(subtitle_format)
-    formatted_subtitles = formatter(timed_subtitles)
+    writer = SubtitleWriter(regions, transcriptions, subtitle_format, error_messages_callback=show_error_messages)
+    writer.write(tmp_src_subtitle_filepath)
 
-    tmp_src_subtitle_file = open(tmp_src_subtitle_filepath, 'wb')
-    tmp_src_subtitle_file.write(formatted_subtitles.encode("utf-8"))
-    tmp_src_subtitle_file.close()
+    # SAVING REGIONS AND TRANSCRIPTIONS VALUES IN JSON FORMAT
+    regions_filename = "regions"
+    regions_filepath = os.path.join(tempfile.gettempdir(), regions_filename)
+    regions_file = open(regions_filepath, "w")
+    json.dump(regions, regions_file)
+    regions_file.close()
+        
+    transcriptions_filename = "transcriptions"
+    transcriptions_filepath = os.path.join(tempfile.gettempdir(), transcriptions_filename)
+    transcriptions_file = open(transcriptions_filepath, "w")
+    json.dump(transcriptions, transcriptions_file)
+    transcriptions_file.close()
 
     # SAVING TEMPORARY TRANSLATED TRANSCRIPTIONS AS FORMATTED SUBTITLE FILE
+    timed_subtitles = writer.timed_subtitles
     created_regions = []
     created_subtitles = []
     for entry in timed_subtitles:
@@ -2110,36 +2713,63 @@ def save_temporary_transcriptions(src, dst, subtitle_format):
     if len(created_subtitles)>0:
         info = 'Saving temporary translated transcriptions'
         total = 100
-        main_window.write_event_value('-EVENT-PROGRESS-BAR-', (info, total, "0%", 0))
+        start_time = time.time()
+        time_str = "ETA  : --:--:--"
+
+        main_window.write_event_value('-EVENT-UPDATE-GENERIC-PROGRESS-BAR-', (info, total, "0%", 0, time_str))
+
         transcript_translator = SentenceTranslator(src=src, dst=dst)
         translated_transcriptions = []
         pool = multiprocessing.Pool(10, initializer=NoConsoleProcess)
+
         for i, translated_transcription in enumerate(pool.imap(transcript_translator, created_subtitles)):
             translated_transcriptions.append(translated_transcription)
             progress = int(i*100/len(created_subtitles))
             percentage = f'{progress}%'
-            main_window.write_event_value('-EVENT-PROGRESS-BAR-', (info, total, percentage, progress))
-        main_window.write_event_value('-EVENT-PROGRESS-BAR-', (info, total, "100%", 100))
+            if progress > 0:
+                elapsed_time = time.time() - start_time
+                eta_seconds = (elapsed_time / progress) * (total - progress)
+            else:
+                eta_seconds = 0
+            eta_time = timedelta(seconds=int(eta_seconds))
+            eta_str = str(eta_time)
+            hour, minute, second = eta_str.split(":")
+            time_str = "ETA  : " + hour.zfill(2) + ":" + minute + ":" + second
+            main_window.write_event_value('-EVENT-UPDATE-GENERIC-PROGRESS-BAR-', (info, total, percentage, progress, time_str))
+
+            if progress == total:
+                elapsed_time_seconds = timedelta(seconds=int(elapsed_time))
+                elapsed_time_str = str(elapsed_time_seconds)
+                hour, minute, second = elapsed_time_str.split(":")
+                time_str = "Time : " + hour.zfill(2) + ":" + minute + ":" + second
+                main_window.write_event_value('-EVENT-UPDATE-GENERIC-PROGRESS-BAR-', (info, total, "100%", total, time_str))
+
+        elapsed_time = time.time() - start_time
+        elapsed_time_seconds = timedelta(seconds=int(elapsed_time))
+        elapsed_time_str = str(elapsed_time_seconds)
+        hour, minute, second = elapsed_time_str.split(":")
+        time_str = "Time : " + hour.zfill(2) + ":" + minute + ":" + second
+        main_window.write_event_value('-EVENT-UPDATE-GENERIC-PROGRESS-BAR-', (info, total, "100%", total, time_str))
+
         pool.close()
         pool.join()
         pool = None
 
-        timed_translated_subtitles = [(r, t) for r, t in zip(created_regions, translated_transcriptions) if t]
-        formatter = FORMATTERS.get(subtitle_format)
-        formatted_translated_subtitles = formatter(timed_translated_subtitles)
+        tmp_dst_subtitle_filename = f"record.{dst}.{subtitle_format}"
+        tmp_dst_subtitle_filepath = os.path.join(tempfile.gettempdir(), tmp_dst_subtitle_filename)
 
-        tmp_dst_subtitle_filepath = tmp_src_subtitle_filepath[ :-4] + ".translated." + subtitle_format
+        translation_writer = SubtitleWriter(created_regions, translated_transcriptions, subtitle_format, error_messages_callback=show_error_messages)
+        translation_writer.write(tmp_dst_subtitle_filepath)
 
-        with open(tmp_dst_subtitle_filepath, 'wb') as f:
-            f.write(formatted_translated_subtitles.encode("utf-8"))
-            f.close()
-
-        with open(tmp_dst_subtitle_filepath, 'a') as f:
-            f.write("\n")
-            f.close()
+        # SAVING TRANSLATED TRANSCRIPTIONS VALUES IN JSON FORMAT
+        translated_transcriptions_filename = "translated_transcriptions"
+        translated_transcriptions_filepath = os.path.join(tempfile.gettempdir(), translated_transcriptions_filename)
+        translated_transcriptions_file = open(translated_transcriptions_filepath, "w")
+        json.dump(translated_transcriptions, translated_transcriptions_file)
+        translated_transcriptions_file.close()
 
    # SAVING TEMPORARY TRANSLATED TRANSCRIPTION AS TEXT FILE
-    tmp_dst_txt_transcription_filename = "record.translated.txt"
+    tmp_dst_txt_transcription_filename = f"record.{dst}.txt"
     tmp_dst_txt_transcription_filepath = os.path.join(tempfile.gettempdir(), tmp_dst_txt_transcription_filename)
 
     with open(tmp_dst_txt_transcription_filepath, 'w') as f:
@@ -2167,76 +2797,86 @@ def save_temporary_transcriptions(src, dst, subtitle_format):
         f.close()
 
 
-def save_as_declared_subtitle_filename(declared_subtitle_filename, src, dst):
-
-    subtitle_file_base, subtitle_file_extension = os.path.splitext(declared_subtitle_filename)
-    subtitle_file_extension = subtitle_file_extension[1:]
+def save_as_declared_subtitle_filename(declared_src_subtitle_filename, src, dst):
 
     regions_filename = "regions"
     regions_filepath = os.path.join(tempfile.gettempdir(), regions_filename)
+
     transcriptions_filename = "transcriptions"
     transcriptions_filepath = os.path.join(tempfile.gettempdir(), transcriptions_filename)
+
+    translated_transcriptions_filename = "translated_transcriptions"
+    translated_transcriptions_filepath = os.path.join(tempfile.gettempdir(), translated_transcriptions_filename)
+
     regions = None
     transcriptions = None
+    translated_transcriptions = None
 
     transcribe_is_done_filename = "transcribe_is_done"
     transcribe_is_done_filepath = os.path.join(tempfile.gettempdir(), transcribe_is_done_filename)
 
+    tmp_src_txt_transcription_filename = f"record.{src}.txt"
+    tmp_src_txt_transcription_filepath = os.path.join(tempfile.gettempdir(), tmp_dst_txt_transcription_filename)
+
+    tmp_dst_txt_transcription_filename = f"record.{dst}.txt"
+    tmp_dst_txt_transcription_filepath = os.path.join(tempfile.gettempdir(), tmp_dst_txt_transcription_filename)
+
+    declared_src_subtitle_file_base, declared_src_subtitle_file_extension = os.path.splitext(declared_src_subtitle_filename)
+    declared_src_subtitle_file_extension = declared_src_subtitle_file_extension[1:]
+
+    
     while True:
-        if os.path.isfile(transcribe_is_done_filepath):
-            if os.path.isfile(regions_filepath):
-                regions_file = open(regions_filepath, "r")
-                regions = tuple(json.load(regions_file))
-                regions_file.close()
+        if os.path.isfile(regions_filepath):
+            regions_file = open(regions_filepath, "r")
+            regions = tuple(json.load(regions_file))
+            regions_file.close()
 
-            if os.path.isfile(transcriptions_filepath):
-                transcriptions_file = open(transcriptions_filepath, "r")
-                transcriptions = tuple(json.load(transcriptions_file))
-                transcriptions_file.close()
+        if os.path.isfile(transcriptions_filepath):
+            transcriptions_file = open(transcriptions_filepath, "r")
+            transcriptions = tuple(json.load(transcriptions_file))
+            transcriptions_file.close()
 
-            if subtitle_file_extension and subtitle_file_extension in FORMATTERS.keys()and len(regions)>0 and len(transcriptions)>0:
-                subtitle_filepath = "{base}.{format}".format(base=subtitle_file_base, format=subtitle_file_extension)
-                timed_subtitles = [(r, t) for r, t in zip(regions, transcriptions) if t]
-                subtitle_format = subtitle_file_extension
-                formatter = FORMATTERS.get(subtitle_format)
-                formatted_subtitles = formatter(timed_subtitles)
-                subtitle_file = open(subtitle_filepath, 'wb')
-                subtitle_file.write(formatted_subtitles.encode("utf-8"))
-                subtitle_file.close()
+        if declared_src_subtitle_file_extension and declared_src_subtitle_file_extension in SubtitleFormatter.supported_formats and len(regions)>0 and len(transcriptions)>0:
 
-                created_regions = []
-                created_subtitles = []
-                for entry in timed_subtitles:
-                    created_regions.append(entry[0])
-                    created_subtitles.append(entry[1])
+            declared_src_subtitle_filepath = f"{declared_src_subtitle_file_base}.{declared_src_subtitle_file_extension}"
+
+            writer = SubtitleWriter(regions, transcriptions, subtitle_format, error_messages_callback=show_error_messages)
+            writer.write(declared_src_subtitle_filepath)
+
+            timed_subtitles = writer.timed_subtitles
+            created_regions = []
+            created_subtitles = []
+            for entry in timed_subtitles:
+                created_regions.append(entry[0])
+                created_subtitles.append(entry[1])
+
+        else:
+            FONT = ("Helvetica", 10)
+            sg.set_options(font=FONT)
+            sg.Popup("Subtitle format you typed is not supported, subtitle file will be saved in TXT format.", title="Info", line_width=50)
+            declared_src_subtitle_filepath = f"{declared_src_subtitle_file_base}.{src}.txt"
+            shutil.copy(tmp_src_txt_transcription_filepath, declared_src_subtitle_filepath)
+
+        # SAVING TRANSLATED SUBTITLE FILE WITH FILENAME BASED ON SUBTITLE FILENAME DECLARED IN COMMAND LINE ARGUMENTS
+        if not is_same_language(src, dst):
+
+            if os.path.isfile(translated_transcriptions_filepath):
+                translated_transcriptions_file = open(translated_transcriptions_filepath, "r")
+                translated_transcriptions = tuple(json.load(translated_transcriptions_file))
+                translated_transcriptions_file.close()
+
+            declared_dst_subtitle_filepath = f"{declared_src_subtitle_file_base}.{dst}.{declared_src_subtitle_file_extension}"
+
+            if declared_src_subtitle_file_extension and declared_src_subtitle_file_extension in SubtitleFormatter.supported_formats and len(created_regions)>0 \
+                    and len(translated_transcriptions)>0:
+
+                translation_writer = SubtitleWriter(created_regions, translated_transcriptions, subtitle_format, error_messages_callback=show_error_messages)
+                translation_writer.write(declared_dst_subtitle_filepath)
 
             else:
-                FONT = ("Helvetica", 10)
-                sg.set_options(font=FONT)
-                sg.Popup("Subtitle format you typed is not supported, subtitle file will be saved in TXT format.", title="Info", line_width=50)
-                subtitle_filepath = "{base}.{format}".format(base=subtitle_file_base, format="txt")
-                shutil.copy(tmp_src_txt_transcription_filepath, subtitle_filepath)
+                shutil.copy(tmp_dst_txt_transcription_filepath, declared_dst_subtitle_filepath)
 
-            # SAVING TRANSLATED SUBTITLE FILE WITH FILENAME BASED ON SUBTITLE FILENAME DECLARED IN COMMAND LINE ARGUMENTS
-            if not is_same_language(src, dst):
-
-                saved_dst_subtitle_filepath = subtitle_filepath[ :-4] + ".translated." + subtitle_format
-
-                if subtitle_file_extension and subtitle_file_extension in FORMATTERS.keys() and len(created_regions)>0 \
-                        and len(translated_transcriptions)>0:
-
-                    timed_translated_subtitles = [(r, t) for r, t in zip(created_regions, translated_transcriptions) if t]
-                    subtitle_format = subtitle_file_extension
-                    formatter = FORMATTERS.get(subtitle_format)
-                    formatted_translated_subtitles = formatter(timed_translated_subtitles)
-                    saved_dst_subtitle_file = open(saved_dst_subtitle_filepath, 'wb')
-                    saved_dst_subtitle_file.write(formatted_translated_subtitles.encode("utf-8"))
-                    saved_dst_subtitle_file.close()
-
-                else:
-                    shutil.copy(tmp_dst_txt_transcription_filepath, saved_dst_subtitle_filepath)
-
-            break
+        break
 
 
 def scroll_to_last_line(window, element):
@@ -2263,6 +2903,56 @@ def remove_temp_files(extension):
                 os.remove(os.path.join(root, file))
 
 
+def download_vosk_model(src, url, folder):
+    global main_window
+
+    # Create the specified folder if it doesn't exist
+    os.makedirs(folder, exist_ok=True)
+
+    # Extract the filename from the URL
+    filename = os.path.basename(url)
+
+    # Specify the path where the file will be saved
+    save_path = os.path.join(folder, filename)
+
+    # Create a progress bar widget
+    vosk_language = VoskLanguage()
+    info = f"Downloading '{vosk_language.name_of_code[src]}' vosk model"
+    total = 100
+    time_str = "ETA  : --:--:--"
+    start_time = time.time()
+
+    main_window.write_event_value('-EVENT-UPDATE-GENERIC-PROGRESS-BAR-', (info, total, "0%", 0, time_str))
+
+    def progress_hook(block_count, block_size, total_size):
+        progress = int(100*block_count*block_size/total_size)
+        percentage = f'{progress}%'
+        if progress > 0:
+            elapsed_time = time.time() - start_time
+            eta_seconds = (elapsed_time / progress) * (total - progress)
+        else:
+            eta_seconds = 0
+        eta_time = timedelta(seconds=int(eta_seconds))
+        eta_str = str(eta_time)
+        hour, minute, second = eta_str.split(":")
+        time_str = "ETA  : " + hour.zfill(2) + ":" + minute + ":" + second
+        main_window.write_event_value('-EVENT-UPDATE-GENERIC-PROGRESS-BAR-', (info, total, percentage, progress, time_str))
+        if progress == total:
+            elapsed_time_seconds = timedelta(seconds=int(elapsed_time))
+            elapsed_time_str = str(elapsed_time_seconds)
+            hour, minute, second = elapsed_time_str.split(":")
+            time_str = "Time : " + hour.zfill(2) + ":" + minute + ":" + second
+            main_window.write_event_value('-EVENT-UPDATE-GENERIC-PROGRESS-BAR-', (info, total, "100%", total, time_str))
+
+    # Start the download with progress
+    urlretrieve(url, save_path, progress_hook)
+
+    with ZipFile(save_path, 'r') as zip_ref:
+        zip_ref.extractall(folder)
+    os.remove(save_path)
+
+
+
 #----------------------------------------------------------- GUI FUNCTIONS ------------------------------------------------------------#
 
 def handle_focus(event):
@@ -2273,15 +2963,16 @@ def handle_focus(event):
 def steal_focus():
     global main_window, overlay_translation_window
 
-    #print("debug")
     if overlay_translation_window:
         overlay_translation_window.close()
         overlay_translation_window=None
+
     if(sys.platform == "win32"):
         main_window.TKroot.attributes('-topmost', True)
         main_window.TKroot.attributes('-topmost', False)
         main_window.TKroot.deiconify()
-    if(sys.platform == "linux"):
+
+    else:
         #main_window.TKroot.attributes('-topmost', 1)
         #main_window.TKroot.attributes('-topmost', 0)
         #main_window.TKroot.deiconify()
@@ -2314,7 +3005,11 @@ def make_progress_bar_window(info, total):
 
     layout = [
                 [sg.Text(info, key='-INFO-')],
-                [sg.ProgressBar(total, orientation='h', size=(30, 10), key='-PROGRESS-'), sg.Text(size=(5,1), key='-PERCENTAGE-')]
+                [
+                    sg.ProgressBar(total, orientation='h', size=(40, 10), key='-PROGRESS-'),
+                    sg.Text(size=(5,1), key='-PERCENTAGE-'),
+                    sg.Text(f"ETA  : --:--:--", size=(14, 1), expand_x=False, expand_y=False, key='-ETA-', justification='r')
+                ]
              ]
 
     progress_bar_window = sg.Window("Progress", layout, no_titlebar=False, finalize=True)
@@ -2324,8 +3019,33 @@ def make_progress_bar_window(info, total):
     return progress_bar_window
 
 
+def show_progress(info, media_file_display_name, progress, start_time):
+    global main_window
+
+    total = 100
+    percentage = f'{progress}%'
+    if progress > 0:
+        elapsed_time = time.time() - start_time
+        eta_seconds = (elapsed_time / progress) * (total - progress)
+    else:
+        eta_seconds = 0
+
+    eta_time = timedelta(seconds=int(eta_seconds))
+    eta_str = str(eta_time)
+    hour, minute, second = eta_str.split(":")
+    time_str = "ETA  : " + hour.zfill(2) + ":" + minute + ":" + second
+    main_window.write_event_value('-EVENT-TRANSCRIBE-UPDATE-PROGRESS-BAR-', (media_file_display_name, info, total, percentage, progress, time_str))
+    if progress == total:
+        elapsed_time_seconds = timedelta(seconds=int(elapsed_time))
+        elapsed_time_str = str(elapsed_time_seconds)
+        hour, minute, second = elapsed_time_str.split(":")
+        time_str = "Time : " + hour.zfill(2) + ":" + minute + ":" + second
+        main_window.write_event_value('-EVENT-TRANSCRIBE-UPDATE-PROGRESS-BAR-', (media_file_display_name, info, total, "100%", total, time_str))
+
+
 def show_error_messages(messages):
     global main_window, not_transcribing
+
     not_transcribing = True
     main_window.write_event_value("-EXCEPTION-", messages)
 
@@ -2337,12 +3057,14 @@ def make_transcribe_window(info, total):
     sg.set_options(font=FONT)
 
     layout = [
+                [sg.Text("File to procees", size=(50,1), expand_x=False, expand_y=False, key='-FILE-DISPLAY-NAME-')],
                 [sg.Text("Progress info", key='-INFO-')],
                 [
-                    sg.ProgressBar(100, orientation='h', size=(50, 10), key='-PROGRESS-'),
-                    sg.Text("0%", size=(5,1), key='-PERCENTAGE-')
+                    sg.ProgressBar(100, orientation='h', size=(40, 10), key='-PROGRESS-'),
+                    sg.Text("0%", size=(5,1), key='-PERCENTAGE-'),
+                    sg.Text(f"ETA  : --:--:--", size=(14, 1), expand_x=False, expand_y=False, key='-ETA-', justification='r')
                 ],
-                [sg.Multiline(size=(60, 10), expand_x=True, expand_y=True, key='-OUTPUT-MESSAGES-')],
+                [sg.Multiline(size=(50, 10), expand_x=True, expand_y=True, key='-OUTPUT-MESSAGES-')],
                 [sg.Button('Cancel', font=FONT, expand_x=True, expand_y=True, key='-CANCEL-')]
              ]
 
@@ -2467,10 +3189,11 @@ def main():
         created_regions, created_subtitles, translated_transcriptions, start_button_click_time, ffmpeg_start_run_time, \
         get_tmp_recorded_streaming_filepath_time, first_streaming_duration_recorded, is_valid_url_streaming, \
         transcribe_window, thread_vosk_transcribe, all_transcribe_threads, not_transcribing, \
-        saved_src_subtitle_filepath, saved_dst_subtitle_filepath, subtitle_filepath, subtitle_file_extension
+        saved_src_subtitle_filepath, saved_dst_subtitle_filepath
 
 
 #------------------------------------------------------------- GUI PARTS -------------------------------------------------------------#
+
 
     xmax, ymax = sg.Window.get_screen_size()
     main_window_width = int(0.5*xmax)
@@ -2479,6 +3202,9 @@ def main():
     multiline_height = int(0.0125*main_window_height)
     FONT = ("Helvetica", 10)
     sg.set_options(font=FONT)
+
+    vosk_language = VoskLanguage()
+    google_language = GoogleLanguage()
 
     layout =  [
                 [sg.Frame('Hints',[
@@ -2493,7 +3219,6 @@ def main():
                     sg.Checkbox("Record Streaming", key='-RECORD-STREAMING-', enable_events=True)
                 ],
                 [
-                    #sg.Text('', size=(3, 1)),
                     sg.Text('Thread status', size=(12, 1)),
                     sg.Text('NOT RECORDING', size=(20, 1), background_color='green1', text_color='black', expand_x=True, expand_y=True, key='-RECORD-STREAMING-STATUS-'),
                     sg.Text('Duration recorded', size=(16, 1)),
@@ -2504,14 +3229,14 @@ def main():
                  sg.Button('SAVE RECORDED STREAMING', size=(31,1), expand_x=True, expand_y=True, key='-EVENT-SAVE-RECORDED-STREAMING-'),
                  sg.Text('', expand_x=True, expand_y=True)],
                 [sg.Text('Audio language', size=(10, 1), expand_x=True, expand_y=True),
-                 sg.Combo(list(map_src_of_language), size=(12, 1), default_value="English", expand_x=True, expand_y=True, key='-SRC-')],
+                 sg.Combo(list(vosk_language.code_of_name), size=(12, 1), default_value="English", enable_events=True, expand_x=True, expand_y=True, key='-SRC-')],
                 [sg.Multiline(size=(96, 5), expand_x=True, expand_y=True, right_click_menu=['&Edit', ['&Copy','&Paste',]], key='-ML-SRC-RESULTS-')],
                 [sg.Multiline(size=(96, 3), expand_x=True, expand_y=True, right_click_menu=['&Edit', ['&Copy','&Paste',]], key='-ML-SRC-PARTIAL-RESULTS-')],
                 [sg.Text('', expand_x=True, expand_y=True),
                  sg.Button('SAVE TRANSCRIPTION', size=(31,1), expand_x=True, expand_y=True, key='-EVENT-SAVE-SRC-TRANSCRIPTION-'),
                  sg.Text('', expand_x=True, expand_y=True)],
                 [sg.Text('Translation language', size=(10, 1),expand_x=True, expand_y=True),
-                 sg.Combo(list(map_dst_of_language), size=(12, 1), default_value="Indonesian", expand_x=True, expand_y=True, key='-DST-')],
+                 sg.Combo(list(google_language.code_of_name), size=(12, 1), default_value="Indonesian", enable_events=True, expand_x=True, expand_y=True, key='-DST-')],
                 [sg.Multiline(size=(96, 5), expand_x=True, expand_y=True, right_click_menu=['&Edit', ['&Copy','&Paste',]], key='-ML-DST-RESULTS-')],
                 [sg.Multiline(size=(96, 3), expand_x=True, expand_y=True, right_click_menu=['&Edit', ['&Copy','&Paste',]], key='-ML-DST-PARTIAL-RESULTS-')],
                 [sg.Text('', expand_x=True, expand_y=True, key='-SPACES3-'),
@@ -2524,10 +3249,11 @@ def main():
 
 #--------------------------------------------------------- NON GUI PARTS -------------------------------------------------------------#
 
-    # VOSK LogLevel
+    # VOSK LogLevel DISABLED
     SetLogLevel(-1)
 
     if sys.platform == "win32":
+        change_code_page(65001)
         stop_ffmpeg_windows(error_messages_callback=show_error_messages)
     else:
         stop_ffmpeg_linux(error_messages_callback=show_error_messages)
@@ -2541,11 +3267,23 @@ def main():
         src_file = open(src_filepath, "r")
         last_selected_src = src_file.read()
 
+    if last_selected_src:
+        src = last_selected_src
+    else:
+        src = "en"
+
     dst_filename = "dst"
     dst_filepath = os.path.join(tempfile.gettempdir(), dst_filename)
     if os.path.isfile(dst_filepath):
         dst_file = open(dst_filepath, "r")
         last_selected_dst = dst_file.read()
+
+    if last_selected_dst:
+        dst = last_selected_dst
+    else:
+        dst = "id"
+
+    subtitle_format = "srt"
 
     recognizing = False
     not_transcribing = True
@@ -2573,30 +3311,23 @@ def main():
         ('All Files', '*.*'),
     ]
 
-    FORMATTERS = {
-        'srt': srt_formatter,
-        'vtt': vtt_formatter,
-        'json': json_formatter,
-        'raw': raw_formatter,
-    }
-
     video_file_types = [
         ('MP4 Files', '*.mp4'),
     ]
 
-    tmp_src_txt_transcription_filename = "record.txt"
+    tmp_src_txt_transcription_filename = f"record.{src}.txt"
     tmp_src_txt_transcription_filepath = os.path.join(tempfile.gettempdir(), tmp_src_txt_transcription_filename)
     if os.path.isfile(tmp_src_txt_transcription_filepath): os.remove(tmp_src_txt_transcription_filepath)
 
-    tmp_dst_txt_transcription_filename = "record.translated.txt"
+    tmp_dst_txt_transcription_filename = f"record.{dst}.txt"
     tmp_dst_txt_transcription_filepath = os.path.join(tempfile.gettempdir(), tmp_dst_txt_transcription_filename)
     if os.path.isfile(tmp_dst_txt_transcription_filepath): os.remove(tmp_dst_txt_transcription_filepath)
 
-    tmp_src_subtitle_filename = "record.srt"
+    tmp_src_subtitle_filename = f"record.{src}.{subtitle_format}"
     tmp_src_subtitle_filepath = os.path.join(tempfile.gettempdir(), tmp_src_subtitle_filename)
     if os.path.isfile(tmp_src_subtitle_filepath): os.remove(tmp_src_subtitle_filepath)
 
-    tmp_dst_subtitle_filename = "record.translated.srt"
+    tmp_dst_subtitle_filename = f"record.{dst}.{subtitle_format}"
     tmp_dst_subtitle_filepath = os.path.join(tempfile.gettempdir(), tmp_dst_subtitle_filename)
     if os.path.isfile(tmp_dst_subtitle_filepath): os.remove(tmp_dst_subtitle_filepath)
 
@@ -2607,6 +3338,10 @@ def main():
     transcriptions_filename = "transcriptions"
     transcriptions_filepath = os.path.join(tempfile.gettempdir(), transcriptions_filename)
     if os.path.isfile(transcriptions_filepath): os.remove(transcriptions_filepath)
+
+    translated_transcriptions_filename = "translated_transcriptions"
+    translated_transcriptions_filepath = os.path.join(tempfile.gettempdir(), translated_transcriptions_filename)
+    if os.path.isfile(translated_transcriptions_filepath): os.remove(translated_transcriptions_filepath)
 
     transcribe_is_done_filename = "transcribe_is_done"
     transcribe_is_done_filepath = os.path.join(tempfile.gettempdir(), transcribe_is_done_filename)
@@ -2629,8 +3364,8 @@ def main():
     else:
         parser.add_argument('-D', '--dst-language', help="Desired language for translation", default="id")
 
-    parser.add_argument('-lls', '--list-languages-src', help="List all available source languages", action='store_true')
-    parser.add_argument('-lld', '--list-languages-dst', help="List all available destination languages", action='store_true')
+    parser.add_argument('-lls', '--list-src-languages', help="List all available source languages", action='store_true')
+    parser.add_argument('-lld', '--list-dst-languages', help="List all available destination languages", action='store_true')
 
     parser.add_argument('-sf', '--subtitle-filename', help="Subtitle file name for saved transcriptions")
     parser.add_argument('-F', '--subtitle-format', help="Desired subtitle format for saved transcriptions (default is \"srt\")", default="srt")
@@ -2648,7 +3383,7 @@ def main():
 
     parser.add_argument("-af", "--audio-filename", type=str, metavar="AUDIO_FILENAME", help="audio file to store recording to", default=None)
     parser.add_argument("-d", "--device", type=int_or_str, help="input device (numeric ID or substring)")
-    parser.add_argument("-r", "--samplerate", type=int, help="sampling rate in Hertz for example 8000, 16000, 44100, or 48000", default=16000)
+    parser.add_argument("-r", "--samplerate", type=int, help="sampling rate in Hertz for example 8000, 16000, 44100, or 48000", default=48000)
 
     parser.add_argument("-u", "--url", type=str, metavar="URL", help="URL of live streaming if you want to record the streaming")
     parser.add_argument("-vf", "--video-filename", type=str, metavar="VIDEO_FILENAME", help="video file to store recording to", default=None)
@@ -2658,37 +3393,35 @@ def main():
     args = parser.parse_args(remaining)
     args = parser.parse_args()
 
-    if args.src_language:
+    if args.src_language not in vosk_language.name_of_code.keys():
+        print("Audio language not supported. Run with --list-languages-src to see all supported source languages.")
+        parser.exit(0)
+    else:
         src = args.src_language
         last_selected_src = src
         src_file = open(src_filepath, "w")
         src_file.write(src)
         src_file.close()
 
-    if args.dst_language:
+    if args.dst_language not in google_language.name_of_code.keys():
+        print("Destination language not supported. Run with --list-languages-dst to see all supported destination languages.")
+        parser.exit(0)
+    else:
         dst = args.dst_language
         last_selected_dst = dst
         dst_file = open(dst_filepath, "w")
         dst_file.write(dst)
         dst_file.close()
 
-    if args.src_language not in map_language_of_src.keys():
-        print("Audio language not supported. Run with --list-languages-src to see all supported source languages.")
-        parser.exit(0)
-
-    if args.dst_language not in map_language_of_dst.keys():
-        print("Destination language not supported. Run with --list-languages-dst to see all supported destination languages.")
-        parser.exit(0)
-
-    if args.list_languages_src:
+    if args.list_src_languages:
         print("List of all source languages:")
-        for code, language in sorted(map_language_of_src.items()):
+        for code, language in sorted(vosk_language.name_of_code.items()):
             print("{code}\t{language}".format(code=code, language=language))
         parser.exit(0)
 
-    if args.list_languages_dst:
+    if args.list_dst_languages:
         print("List of all destination languages:")
-        for code, language in sorted(map_language_of_dst.items()):
+        for code, language in sorted(google_language.name_of_code.items()):
             print("{code}\t{language}".format(code=code, language=language))
         parser.exit(0)
 
@@ -2704,12 +3437,13 @@ def main():
     else:
         dump_fn = None
 
-    if args.subtitle_format not in FORMATTERS.keys():
+
+    subtitle_format = args.subtitle_format
+
+    if subtitle_format not in SubtitleFormatter.supported_formats:
         FONT = ("Helvetica", 10)
         sg.set_options(font=FONT)
         sg.Popup("Subtitle format is not supported, you can choose it later when you save transcriptions.", title="Info", line_width=50)
-
-    subtitle_format = args.subtitle_format
 
     if args.video_filename:
         saved_recorded_streaming_basename, saved_recorded_streaming_extension = os.path.splitext(os.path.basename(args.video_filename))
@@ -2757,11 +3491,11 @@ def main():
     main_window['-RECORD-STREAMING-'].update(False)
 
     if args.src_language:
-        combo_src = map_language_of_src[args.src_language]
+        combo_src = vosk_language.name_of_code[args.src_language]
         main_window['-SRC-'].update(combo_src)
 
     if args.dst_language:
-        combo_dst = map_language_of_dst[args.dst_language]
+        combo_dst = google_language.name_of_code[args.dst_language]
         main_window['-DST-'].update(combo_dst)
 
     if args.url:
@@ -2790,6 +3524,77 @@ def main():
     created_subtitles = None
     translated_transcriptions = None
 
+    # IF VOSK MODEL IS NOT EXIST THEN WE DOWNLOAD THE MODEL
+    vosk_cache_dir = None
+    if sys.platform == "win32":
+        vosk_cache_dir = os.path.expanduser('~\\') + '.cache' + '\\' + 'vosk'
+    elif sys.platform == "linux":
+        vosk_cache_dir = os.path.expanduser('~/.cache/vosk')
+    elif sys.platform == "darwin":
+        vosk_cache_dir = os.path.expanduser('~/Library/Caches/vosk')
+
+    vosk_model_dir = vosk_cache_dir + os.sep + vosk_language.model_of_code[src]
+
+    if not os.path.isdir(vosk_model_dir):
+        FONT = ("Helvetica", 10)
+        sg.set_options(font=FONT)
+        sg.Popup(f"Vosk model for '{vosk_language.name_of_code[src]}' language is not exist, please wait until download progress completed", title="Info", line_width=50)
+
+        os.makedirs(vosk_cache_dir, exist_ok=True)
+        url = MODEL_PRE_URL + vosk_language.model_of_code[src] + ".zip"
+        filename = os.path.basename(url)
+        save_path = os.path.join(vosk_cache_dir, filename)
+
+        info = f"Downloading '{vosk_language.name_of_code[src]}' vosk model"
+        total = 100
+        download_progressbar = make_progress_bar_window(info, total)
+        start_time = time.time()
+
+        def progress_hook(block_count, block_size, total_size):
+            progress = int(100*block_count*block_size/total_size)
+            percentage = f'{progress}%'
+
+            if progress > 0:
+                elapsed_time = time.time() - start_time
+                eta_seconds = (elapsed_time / progress) * (total - progress)
+            else:
+                eta_seconds = 0
+
+            eta_time = timedelta(seconds=int(eta_seconds))
+            eta_str = str(eta_time)
+            hour, minute, second = eta_str.split(":")
+            time_str = "ETA  : " + hour.zfill(2) + ":" + minute + ":" + second
+
+            download_progressbar['-INFO-'].update(info)
+            download_progressbar['-PERCENTAGE-'].update(percentage)
+            download_progressbar['-PROGRESS-'].update(progress)
+            download_progressbar['-ETA-'].update(time_str)
+
+            if progress == total:
+                elapsed_time_seconds = timedelta(seconds=int(elapsed_time))
+                elapsed_time_str = str(elapsed_time_seconds)
+                hour, minute, second = elapsed_time_str.split(":")
+                time_str = "Time : " + hour.zfill(2) + ":" + minute + ":" + second
+                download_progressbar['-INFO-'].update(info)
+                download_progressbar['-PERCENTAGE-'].update(percentage)
+                download_progressbar['-PROGRESS-'].update(progress)
+                download_progressbar['-ETA-'].update(time_str)
+                download_progressbar.refresh()
+                time.sleep(1)
+                download_progressbar.close()
+
+        try:
+            urlretrieve(url, save_path, progress_hook)
+        except Exception as e:
+            sg.Popup(e, title="Error", line_width=50)
+
+        with ZipFile(save_path, 'r') as zip_ref:
+            zip_ref.extractall(vosk_cache_dir)
+        os.remove(save_path)
+
+        #url = MODEL_PRE_URL + vosk_language.model_of_code[src] + ".zip"
+        #download_vosk_model(src, url, vosk_cache_dir)
+
 
 #-------------------------------------------------------------- MAIN LOOP -------------------------------------------------------------#
 
@@ -2797,17 +3602,77 @@ def main():
     while True:
         window, event, values = sg.read_all_windows()
 
-        src = map_src_of_language[str(main_window['-SRC-'].get())]
+        src = vosk_language.code_of_name[str(main_window['-SRC-'].get())]
         last_selected_src = src
         src_file = open(src_filepath, "w")
         src_file.write(src)
         src_file.close()
 
-        dst = map_dst_of_language[str(main_window['-DST-'].get())]
+        dst = google_language.code_of_name[str(main_window['-DST-'].get())]
         last_selected_dst = dst
         dst_file = open(dst_filepath, "w")
         dst_file.write(dst)
         dst_file.close()
+
+        vosk_model_dir = vosk_cache_dir + os.sep + vosk_language.model_of_code[src]
+        if not os.path.isdir(vosk_model_dir):
+            FONT = ("Helvetica", 10)
+            sg.set_options(font=FONT)
+            sg.Popup(f"Vosk model for '{vosk_language.name_of_code[src]}' language is not exist, please wait until download progress completed", title="Info", line_width=50)
+
+            os.makedirs(vosk_cache_dir, exist_ok=True)
+            url = MODEL_PRE_URL + vosk_language.model_of_code[src] + ".zip"
+            filename = os.path.basename(url)
+            save_path = os.path.join(vosk_cache_dir, filename)
+
+            info = f"Downloading '{vosk_language.name_of_code[src]}' vosk model"
+            total = 100
+            download_progressbar = make_progress_bar_window(info, total)
+            start_time = time.time()
+
+            def progress_hook(block_count, block_size, total_size):
+                progress = int(100*block_count*block_size/total_size)
+                percentage = f'{progress}%'
+
+                if progress > 0:
+                    elapsed_time = time.time() - start_time
+                    eta_seconds = (elapsed_time / progress) * (total - progress)
+                else:
+                    eta_seconds = 0
+                eta_time = timedelta(seconds=int(eta_seconds))
+                eta_str = str(eta_time)
+                hour, minute, second = eta_str.split(":")
+                time_str = "ETA  : " + hour.zfill(2) + ":" + minute + ":" + second
+
+                download_progressbar['-INFO-'].update(info)
+                download_progressbar['-PERCENTAGE-'].update(percentage)
+                download_progressbar['-PROGRESS-'].update(progress)
+                download_progressbar['-ETA-'].update(time_str)
+
+                if progress == total:
+                    elapsed_time_seconds = timedelta(seconds=int(elapsed_time))
+                    elapsed_time_str = str(elapsed_time_seconds)
+                    hour, minute, second = elapsed_time_str.split(":")
+                    time_str = "Time : " + hour.zfill(2) + ":" + minute + ":" + second
+                    download_progressbar['-INFO-'].update(info)
+                    download_progressbar['-PERCENTAGE-'].update(percentage)
+                    download_progressbar['-PROGRESS-'].update(progress)
+                    download_progressbar['-ETA-'].update(time_str)
+                    download_progressbar.refresh()
+                    time.sleep(1)
+                    download_progressbar.close()
+
+            try:
+                urlretrieve(url, save_path, progress_hook)
+            except Exception as e:
+                sg.Popup(e, title="Error", line_width=50)
+
+            with ZipFile(save_path, 'r') as zip_ref:
+                zip_ref.extractall(vosk_cache_dir)
+            os.remove(save_path)
+
+            #url = MODEL_PRE_URL + vosk_language.model_of_code[src] + ".zip"
+            #download_vosk_model(src, url, vosk_cache_dir)
 
 
         if event == 'right_click':
@@ -2832,7 +3697,7 @@ def main():
                     win32clipboard.EmptyClipboard()
                     win32clipboard.SetClipboardText(selected_text)
                     win32clipboard.CloseClipboard()
-            elif sys.platform == "linux":
+            else:
                 if selected_text:
                     set_clipboard_text(selected_text)
 
@@ -2858,7 +3723,7 @@ def main():
                 except Exception as e:
                     #show_error_messages(e)
                     pass
-            elif sys.platform == "linux":
+            else:
                 try:
                     clipboard_data = get_clipboard_text()
                 except:
@@ -2904,7 +3769,8 @@ def main():
                     if main_window['-URL-'].get() != (None or "") and main_window['-RECORD-STREAMING-'].get() == True:
                         if sys.platform == "win32":
                             stop_record_streaming_windows()
-                        elif sys.platform == "linux":
+
+                        else:
                             stop_record_streaming_linux()
 
                     text = ""
@@ -2926,7 +3792,8 @@ def main():
                     data = ctypes.c_char_p(clipboard_data)
                     main_window['-URL-'].update(data.value.decode('utf-8'))
                 user32.CloseClipboard()
-            elif sys.platform == "linux":
+
+            else:
                 text = get_clipboard_text()
                 if text:
                     main_window['-URL-'].update(text.strip())
@@ -2991,7 +3858,7 @@ def main():
                             thread_record_streaming = Thread(target=record_streaming_windows, args=(stream_url.url, tmp_recorded_streaming_filepath), daemon=True)
                             thread_record_streaming.start()
 
-                        elif sys.platform == "linux":
+                        else:
                             thread_record_streaming = Thread(target=record_streaming_linux, args=(stream_url.url, tmp_recorded_streaming_filepath))
                             thread_record_streaming.start()
 
@@ -3009,13 +3876,13 @@ def main():
                 if main_window['-URL-'].get() != (None or "") and main_window['-RECORD-STREAMING-'].get() == True:
                     time.sleep(1)
 
-                tmp_src_txt_transcription_filename = "record.txt"
+                tmp_src_txt_transcription_filename = f"record.{src}.txt"
                 tmp_src_txt_transcription_filepath = os.path.join(tempfile.gettempdir(), tmp_src_txt_transcription_filename)
                 tmp_src_txt_transcription_file = open(tmp_src_txt_transcription_filepath, "w")
                 tmp_src_txt_transcription_file.write("")
                 tmp_src_txt_transcription_file.close()
 
-                tmp_dst_txt_transcription_filename = "record.translated.txt"
+                tmp_dst_txt_transcription_filename = f"record.{dst}.txt"
                 tmp_dst_txt_transcription_filepath = os.path.join(tempfile.gettempdir(), tmp_dst_txt_transcription_filename)
                 tmp_dst_txt_transcription_file = open(tmp_src_txt_transcription_filepath, "w")
                 tmp_dst_txt_transcription_file.write("")
@@ -3026,7 +3893,7 @@ def main():
                 main_window['-ML-DST-PARTIAL-RESULTS-'].update("")
                 main_window['-ML-DST-RESULTS-'].update("")
 
-                thread_recognize = Thread(target=worker_recognize, args=(src, dst), daemon=True)
+                thread_recognize = Thread(target=worker_recognize, args=(src, dst, show_error_messages), daemon=True)
                 thread_recognize.start()
 
                 thread_timed_translate = Thread(target=worker_timed_translate, args=(src, dst), daemon=True)
@@ -3052,12 +3919,11 @@ def main():
                         #print("thread_record_streaming.is_alive() = {}".format(thread_record_streaming.is_alive()))
                         stop_record_streaming_windows()
 
-                    elif sys.platform == "linux":
+                    else:
                         #print("thread_record_streaming.is_alive() = {}".format(thread_record_streaming.is_alive()))
                         stop_record_streaming_linux()
 
-                    tmp_src_subtitle_basename, extension = os.path.splitext(os.path.basename(tmp_recorded_streaming_filepath))
-                    tmp_src_subtitle_filename = tmp_src_subtitle_basename + "." + subtitle_format
+                    tmp_src_subtitle_filename = f"record.{src}.{subtitle_format}"
                     tmp_src_subtitle_filepath = os.path.join(tempfile.gettempdir(), tmp_src_subtitle_filename)
 
                     # PERFORM TRANSCRIBE
@@ -3081,7 +3947,7 @@ def main():
                     if sys.platform == "win32":
                         stop_record_streaming_windows()
 
-                    elif sys.platform == "linux":
+                    else:
                         stop_record_streaming_linux()
 
                 # SAVING TRANSCRIPTIONS AS FORMATTED SUBTITLE FILE WITH FILENAME DECLARED IN COMMAND LINE ARGUMENTS
@@ -3122,9 +3988,10 @@ def main():
 
         elif event == '-EVENT-RESULTS-' and recognizing==True:
 
+            sentence_translator = SentenceTranslator(src=src, dst=dst, error_messages_callback=show_error_messages)
             line = str(values[event]).strip().lower()
             main_window['-ML-SRC-RESULTS-'].update(line + "\n", background_color_for_value='yellow1', append=True, autoscroll=True)
-            translated_line = GoogleTranslate(line, src, dst, error_messages_callback=show_error_messages)
+            translated_line = sentence_translator(line)
             main_window['-ML-DST-RESULTS-'].update(translated_line + "\n", background_color_for_value='yellow1', append=True, autoscroll=True)
 
             if overlay_translation_window:
@@ -3176,13 +4043,14 @@ def main():
             main_window['-STREAMING-DURATION-RECORDED-'].update(record_duration)
 
 
-        elif event == '-EVENT-PROGRESS-BAR-':
+        elif event == '-EVENT-UPDATE-GENERIC-PROGRESS-BAR-':
 
             pb = values[event]
             info = pb[0]
             total = pb[1]
             percentage = pb[2]
             progress = pb[3]
+            time_str = pb[4]
 
             FONT = ("Helvetica", 10)
             sg.set_options(font=FONT)
@@ -3195,7 +4063,11 @@ def main():
             progressbar['-INFO-'].update(info)
             progressbar['-PERCENTAGE-'].update(percentage)
             progressbar['-PROGRESS-'].update(progress)
+            progressbar['-ETA-'].update(time_str)
+
             if progress == total:
+                progressbar['-ETA-'].update(time_str)
+                progressbar.refresh()
                 time.sleep(1)
                 progressbar.Hide()
 
@@ -3217,9 +4089,11 @@ def main():
                         transcribe_window['-CANCEL-'].Widget.config(font=FONT)
 
                 transcribe_window['-OUTPUT-MESSAGES-'].update("")
+                transcribe_window['-FILE-DISPLAY-NAME-'].update("File to process")
                 transcribe_window['-INFO-'].update("Progress info")
                 transcribe_window['-PROGRESS-'].update(0)
                 transcribe_window['-PERCENTAGE-'].update("0%")
+                transcribe_window['-ETA-'].update('ETA  : --:--:--')
 
 
         elif event == '-EVENT-TRANSCRIBE-SEND-MESSAGES-':
@@ -3238,34 +4112,56 @@ def main():
             show = values[event]
 
             if show:
+                transcribe_window['-FILE-DISPLAY-NAME-'].update(visible=True)
                 transcribe_window['-INFO-'].update(visible=True)
                 transcribe_window['-PROGRESS-'].update(visible=True)
                 transcribe_window['-PERCENTAGE-'].update(visible=True)
+                transcribe_window['-ETA-'].update(visible=True)
             elif not show:
+                transcribe_window['-FILE-DISPLAY-NAME-'].update(visible=False)
                 transcribe_window['-INFO-'].update(visible=False)
                 transcribe_window['-PROGRESS-'].update(visible=False)
                 transcribe_window['-PERCENTAGE-'].update(visible=False)
+                transcribe_window['-ETA-'].update(visible=False)
 
 
         elif event == '-EVENT-TRANSCRIBE-HIDE-PROGRESS-BAR-':
 
             hide = values[event]
 
+            transcribe_window['-FILE-DISPLAY-NAME-'].update(visible=False)
             transcribe_window['-INFO-'].update(visible=False)
             transcribe_window['-PROGRESS-'].update(visible=False)
             transcribe_window['-PERCENTAGE-'].update(visible=False)
+            transcribe_window['-ETA-'].update(visible=False)
 
 
         elif event == '-EVENT-TRANSCRIBE-UPDATE-PROGRESS-BAR-':
 
             pb = values[event]
-            info = pb[0]
-            percentage = pb[1]
-            progress = pb[2]
+            media_file_display_name = pb[0]
+            info = pb[1]
+            total = pb[2]
+            percentage = pb[3]
+            progress = pb[4]
+            time_str = pb[5]
 
+            processing_string = ""
+            if media_file_display_name == "...":
+                processing_string = "File to process"
+            else:
+                processing_string = f"Processing '{media_file_display_name}'"
+
+            transcribe_window['-FILE-DISPLAY-NAME-'].update(processing_string)
             transcribe_window['-INFO-'].update(info)
             transcribe_window['-PERCENTAGE-'].update(percentage)
             transcribe_window['-PROGRESS-'].update(progress)
+            transcribe_window['-ETA-'].update(time_str)
+
+            if progress == total:
+                transcribe_window['-ETA-'].update(time_str)
+                transcribe_window.refresh()
+                time.sleep(1)
 
 
         if event == '-CANCEL-' or event == sg.WIN_CLOSED:
@@ -3333,16 +4229,13 @@ def main():
 
                         selected_subtitle_format = saved_src_subtitle_filename.split('.')[-1]
 
-                        if selected_subtitle_format in FORMATTERS.keys():
-                            timed_subtitles = [(r, t) for r, t in zip(regions, transcriptions) if t]
-                            subtitle_format = selected_subtitle_format
-                            formatter = FORMATTERS.get(subtitle_format)
-                            formatted_subtitles = formatter(timed_subtitles)
-                            tmp_src_subtitle_filename = saved_src_subtitle_filename
-                            subtitle_file = open(tmp_src_subtitle_filename, 'wb')
-                            subtitle_file.write(formatted_subtitles.encode("utf-8"))
-                            subtitle_file.close()
+                        if selected_subtitle_format in SubtitleFormatter.supported_formats:
+
+                            writer = SubtitleWriter(regions, transcriptions, subtitle_format, error_messages_callback=show_error_messages)
+                            writer.write(saved_src_subtitle_filename)
+
                         else:
+
                             saved_src_subtitle_file = open(saved_src_subtitle_filename, "w")
                             tmp_src_txt_transcription_file = open(tmp_src_txt_transcription_filepath, "r")
                             for line in tmp_src_txt_transcription_file:
@@ -3372,14 +4265,10 @@ def main():
 
                         selected_subtitle_format = saved_dst_subtitle_filename.split('.')[-1]
 
-                        if selected_subtitle_format in FORMATTERS.keys():
-                            timed_translated_subtitles = [(r, t) for r, t in zip(created_regions, translated_transcriptions) if t]
-                            subtitle_format = selected_subtitle_format
-                            formatter = FORMATTERS.get(subtitle_format)
-                            formatted_translated_subtitles = formatter(timed_translated_subtitles)
-                            saved_dst_subtitle_file = open(saved_dst_subtitle_filename, 'wb')
-                            saved_dst_subtitle_file.write(formatted_translated_subtitles.encode("utf-8"))
-                            saved_dst_subtitle_file.close()
+                        if selected_subtitle_format in SubtitleFormatter.supported_formats:
+                            translation_writer = SubtitleWriter(created_regions, translated_transcriptions, subtitle_format, error_messages_callback=show_error_messages)
+                            translation_writer.write(saved_dst_subtitle_filename)
+
                         else:
                             saved_dst_subtitle_file = open(saved_dst_subtitle_filename, "w")
                             tmp_dst_txt_transcription_file = open(tmp_dst_txt_transcription_filepath, "r")
@@ -3399,7 +4288,7 @@ def main():
 
         elif event == '-EXCEPTION-':
             e = str(values[event]).strip()
-            sg.Popup(e, title="Info", line_width=50)
+            sg.Popup(e, title="Error", line_width=50)
             if transcribe_window: transcribe_window['-OUTPUT-MESSAGES-'].update("", append=False)
 
 
@@ -3451,6 +4340,7 @@ def main():
     if tmp_dst_txt_transcription_filepath and os.path.isfile(tmp_dst_txt_transcription_filepath): os.remove(tmp_dst_txt_transcription_filepath)
     if os.path.isfile(regions_filepath): os.remove(regions_filepath)
     if os.path.isfile(transcriptions_filepath): os.remove(transcriptions_filepath)
+    if os.path.isfile(translated_transcriptions_filepath): os.remove(translated_transcriptions_filepath)
     if os.path.isfile(transcribe_is_done_filepath): os.remove(transcribe_is_done_filepath)
 
     remove_temp_files("wav")
