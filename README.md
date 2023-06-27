@@ -119,9 +119,9 @@ options:
                         Spoken language
   -D DST_LANGUAGE, --dst-language DST_LANGUAGE
                         Desired language for translation
-  -lls, --list-languages-src
+  -lls, --list-src-languages
                         List all available source languages
-  -lld, --list-languages-dst
+  -lld, --list-dst-languages
                         List all available destination languages
   -sf SUBTITLE_FILENAME, --subtitle-filename SUBTITLE_FILENAME
                         Subtitle file name for saved transcriptions
