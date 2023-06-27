@@ -33,9 +33,6 @@ If it doesn't run well then you need to install python on your Windows system.
 When you run this app for the very first time it may takes some times to download vosk language model, you can check those  downloaded models in "/home/username/.cache/vosk" (if you're on Linux) and "C:\\Users\\Username\\.cache\vosk\\" (if you're on Windows).
 
 You can always download those small models manually from https://alphacephei.com/vosk/models then extract them to that used folder.
-Pay attension to those folders name, because their names should contain the language codes in \"\_\_init\_\_.py\", esspecially for Chinese language, which in \"\_\_init\_\_.py\" its code is \"zh\", so you should rename that extracted downloaded model to \"vosk-model-small-zh-0.22\". This is needed for GoogleTranslate funcion to work properly.
-![image](https://user-images.githubusercontent.com/88623122/234000963-c2ab4c69-70fd-4374-9a1a-0cc1316791e8.png)
-![image](https://user-images.githubusercontent.com/88623122/234001411-f06821c9-0b68-4414-b3c3-a7280da4d560.png)
 
 You can try to compile that script in win folder (if your OS is Windows) or linux folder (if your OS is Linux) into a single executable file with pyinstaller:
 ```
