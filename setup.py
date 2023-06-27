@@ -4,6 +4,10 @@ import platform
 import os
 import stat
 from pyvosklivesubtitle import VERSION
+import warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning, module='setuptools')
+warnings.filterwarnings("ignore", category=UserWarning, module='setuptools')
+warnings.filterwarnings("ignore", message=".*is deprecated*")
 
 try:
     from setuptools import setup, find_packages
@@ -48,15 +52,15 @@ long_description = (
 )
 
 install_requires = [
+    "pysimplegui>=4.60.1",
     "sounddevice>=0.4.4",
     "vosk>=0.3.44",
-    "pysimplegui>=4.60.1",
+    "requests>=2.27.1",
     "httpx>=0.13.3",
     "urllib3>=1.26.0,<3.0",
     "streamlink>=5.3.1",
     "six>=1.16.0",
     "pysrt>=1.1.2",
-    "requests>=2.27.1",
     "tqdm>=4.64.0",
 ]
 
