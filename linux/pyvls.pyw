@@ -33,7 +33,7 @@ import wave
 import audioop
 import math
 
-VERSION = '0.2.0'
+VERSION = '0.2.1'
 
 
 #============================================================== VOSK PART ==============================================================#
@@ -1335,9 +1335,9 @@ class WavConverter:
                     time_str = stderr_line.split('time=')[1].split()[0]
                     current_duration = sum(float(x) * 1000 * 60 ** i for i, x in enumerate(reversed(time_str.split(":"))))
 
-                    if current_duration>0:
+                    if current_duration>0 and current_duration<=total_duration*1000:
                         percentage = int(current_duration*100/(int(float(total_duration))*1000))
-                        if self.progress_callback:
+                        if self.progress_callback and percentage <= 100:
                             self.progress_callback(info, media_file_display_name, percentage, start_time)
 
             if self.progress_callback:
@@ -2372,7 +2372,7 @@ def extract_audio(media_filepath, n_channels=1, rate=48000):
                 time_str = stderr_line.split('time=')[1].split()[0]
                 current_duration = sum(float(x) * 1000 * 60 ** i for i, x in enumerate(reversed(time_str.split(":"))))
 
-                if current_duration>0:
+                if current_duration>0 and current_duration<=total_duration*1000:
                     progress = int(current_duration*100/(int(float(total_duration))*1000))
                     percentage = f'{progress}%'
                     if progress > 0:
@@ -3100,7 +3100,8 @@ def make_overlay_translation_window(translated_text):
     else:
         LINE_SIZE = 28*ymax/720
 
-    window_height = int(nl*LINE_SIZE)
+    #window_height = int(nl*LINE_SIZE)
+    window_height = int((nl+1)*LINE_SIZE)
     window_x=int((xmax-window_width)/2)
 
     if nl == 1:
