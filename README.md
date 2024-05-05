@@ -149,3 +149,5 @@ Those command line switches are just to make this application directly select th
 MIT
 
 Check my other SPEECH RECOGNITIION + TRANSLATE PROJECTS https://github.com/botbahlul?tab=repositories
+
+Buy me coffee : https://sociabuzz.com/botbahlul/tribe
