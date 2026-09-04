@@ -64,7 +64,7 @@ sudo apt update
 sudo apt install -y ffmpeg
 ```
 
-I was succesfuly compiled this script in Windows 10 with pyinstaller-5.1 and Pyhton-3.10.4, and python-3.8.12 in Debian 9
+I was succesfuly compiled this script in Windows 10 with pyinstaller-5.1 and Pyhton-3.10.4, and python-3.10.4 in Debian 10
 
 Another alternative way you can install this script with python by cloning this git (or downloading this git as zip then extract it into 
 a folder), and then just type :
