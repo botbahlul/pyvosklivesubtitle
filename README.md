@@ -76,6 +76,7 @@ python setup.py install
 
 If you fail when installing any python modules using pip, you can always use this way, get that module from github then build them manually
 
+
 For best recognizing performance, on windows you will need STEREO MIX or VIRTUAL AUDIO CABLE as RECORDING/INPUT DEVICE 
 ![image](https://github.com/botbahlul/pyvosklivesubtitle/assets/88623122/e08b4b85-45cb-477b-a7f8-297d94791839)
 ![image](https://user-images.githubusercontent.com/88623122/199527559-e2609d8c-3479-420d-8c52-806fa56a21f4.png)
@@ -86,9 +87,12 @@ LAUNCH Audio Repeater MME, NOT Audio Repeater KS! AND THEN CLICK THAT START BUTT
 ![image](https://github.com/botbahlul/pyvosklivesubtitle/assets/88623122/6b09c622-7a76-42af-a776-738468466025)
 
 
-and on linux you willl need PAVUCONTROL (by choosing MONITOR of your audio device as INPUT DEVICE)
+On linux you willl need PAVUCONTROL (by choosing MONITOR of your audio device as INPUT DEVICE)
 ![image](https://user-images.githubusercontent.com/88623122/231320153-e89bb21e-916f-4e82-a520-43e3112f6801.png)
 ![image](https://user-images.githubusercontent.com/88623122/230965838-40764e2a-8ce9-4a03-9f8b-901c9eae43ef.png)
+
+
+On macOS you will need blackhole : https://github.com/existentialaudio/blackhole
 
 
 To DRAG/MOVE that TRANSLATION TEXT anywhere on the screen, just USE CONTROL KEY + LEFT MOUSE combination.
