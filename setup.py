@@ -1,55 +1,116 @@
 from __future__ import unicode_literals
-import sys
-import platform
+
 import os
-import stat
-from pyvosklivesubtitle import VERSION
+import platform
+import sys
 import warnings
-warnings.filterwarnings("ignore", category=DeprecationWarning, module='setuptools')
-warnings.filterwarnings("ignore", category=UserWarning, module='setuptools')
-warnings.filterwarnings("ignore", message=".*is deprecated*")
+import re
 
-try:
-    from setuptools import setup, find_packages
-    from setuptools.dist import Distribution
-except ImportError:
-    from distutils.core import setup
-    from distutils.dist import Distribut
+from setuptools import setup, find_packages
+from setuptools.dist import Distribution
 
-if sys.version_info <= (3, 8):
-    print("THIS MODULE REQUIRES PYTHON 3.8+. YOU ARE CURRENTLY USING PYTHON {0}".format(sys.version))
+#from pyvosklivesubtitle import VERSION
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+with open(
+    os.path.join(BASE_DIR, "pyvosklivesubtitle", "__init__.py"),
+    encoding="utf-8",
+) as f:
+    VERSION = re.search(
+        r'^VERSION\s*=\s*[\'"]([^\'"]+)[\'"]',
+        f.read(),
+        re.MULTILINE,
+    ).group(1)
+
+
+warnings.filterwarnings(
+    "ignore",
+    category=DeprecationWarning,
+    module="setuptools",
+)
+warnings.filterwarnings(
+    "ignore",
+    category=UserWarning,
+    module="setuptools",
+)
+warnings.filterwarnings(
+    "ignore",
+    message=".*is deprecated*",
+)
+
+
+# ----------------------------------------------------------------------
+# Python version
+# ----------------------------------------------------------------------
+
+if sys.version_info < (3, 10):
+    print(
+        "THIS MODULE REQUIRES PYTHON 3.10+. "
+        "YOU ARE CURRENTLY USING PYTHON {0}".format(sys.version)
+    )
     sys.exit(1)
 
 
+# ----------------------------------------------------------------------
+# Platform detection
+# ----------------------------------------------------------------------
+
+SYSTEM = platform.system()
+
+if SYSTEM not in ("Windows", "Linux", "Darwin"):
+    raise NotImplementedError(
+        "Platform '{}' is not supported.".format(SYSTEM)
+    )
+
+
+# ----------------------------------------------------------------------
+# Binary distribution
+#
+# The package contains native Vosk libraries (.so/.dll/.dyld), therefore
+# it MUST NOT be built as a pure Python wheel.
+# ----------------------------------------------------------------------
+
 class BinaryDistribution(Distribution):
+
     def has_ext_modules(self):
         return True
 
     def is_pure(self):
         return False
 
-    def get_ext_modules(self):
-        if platform.system() == 'Windows':
-            return []
-        else:
-            return super().get_ext_modules()
 
+# ----------------------------------------------------------------------
+# Platform-specific binary files
+# ----------------------------------------------------------------------
 
 def get_lib_files():
-    if platform.system() == 'Linux':
-        return ['libvosk.so']
-    elif platform.system() == 'Darwin':
-        return ['libvosk.dyld']
-    elif platform.system() == 'Windows':
-        return ['libgcc_s_seh-1.dll', 'libstdc++-6.dll', 'libvosk.dll', 'libwinpthread-1.dll']
-    if not (platform.system() == 'Linux' or platform.system() == 'Darwin' or platform.system() == 'Windows'):
-        raise NotImplementedError(f"Platform '{platform.system()}' is not supported.")
+    if SYSTEM == "Linux":
+        return [
+            "libvosk.so",
+        ]
+
+    if SYSTEM == "Darwin":
+        # Vosk Python binding currently loads libvosk.dyld.
+        return [
+            "libvosk.dyld",
+        ]
+
+    if SYSTEM == "Windows":
+        return [
+            "libvosk.dll",
+            "libgcc_s_seh-1.dll",
+            "libstdc++-6.dll",
+            "libwinpthread-1.dll",
+        ]
+
+    raise NotImplementedError(
+        "Platform '{}' is not supported.".format(SYSTEM)
+    )
 
 
-long_description = (
-    'pyvosklivesubtitle is a python based desktop aplication which can recognize any live streaming'
-    'in 21 languages that supported by VOSK then translate and display it as LIVE SUBTITLES'
-)
+# ----------------------------------------------------------------------
+# Dependencies
+# ----------------------------------------------------------------------
 
 install_requires = [
     "pysimplegui>=4.60.1",
@@ -61,28 +122,69 @@ install_requires = [
     "urllib3>=1.26.0,<3.0",
     "six>=1.16.0",
     "pysrt>=1.1.2",
+    "av==12.2.0",
     "tqdm>=4.64.0",
 ]
 
-if platform.system() == "Windows":
+
+# Windows-only dependency
+if SYSTEM == "Windows":
     install_requires.append("pywin32>=306")
+
+
+# ----------------------------------------------------------------------
+# Long description
+# ----------------------------------------------------------------------
+
+long_description = (
+    "pyvosklivesubtitle is a Python based desktop application "
+    "which can recognize live streaming in 21 languages supported "
+    "by VOSK, then translate and display it as LIVE SUBTITLES."
+)
+
+
+# ----------------------------------------------------------------------
+# Setup
+# ----------------------------------------------------------------------
 
 setup(
     name="pyvosklivesubtitle",
-    description="A Python based desktop aplication that can RECOGNIZE any live streaming in 21 languages that supported by VOSK then TRANSLATE and display it as LIVE SUBTITLES",
+
     version=VERSION,
-    author='Bot Bahlul',
-    author_email='bot.bahlul@gmail.com',
-    url='https://github.com/botbahlul/pyvosklivesubtitle',
-    packages=[str('pyvosklivesubtitle')],
+
+    description=(
+        "A Python based desktop application that can RECOGNIZE "
+        "live streaming in 21 languages supported by VOSK, "
+        "then TRANSLATE and display it as LIVE SUBTITLES"
+    ),
+
+    long_description=long_description,
+
+    author="Bot Bahlul",
+    author_email="bot.bahlul@gmail.com",
+
+    url="https://github.com/botbahlul/pyvosklivesubtitle",
+
+    packages=find_packages(),
+
+    include_package_data=True,
+
+    package_data={
+        "pyvosklivesubtitle": get_lib_files(),
+    },
+
+    install_requires=install_requires,
+
     entry_points={
-        'console_scripts': [
-            'pyvosklivesubtitle = pyvosklivesubtitle:main',
+        "console_scripts": [
+            "pyvosklivesubtitle=pyvosklivesubtitle:main",
         ],
     },
-    install_requires=install_requires,
-    license=open("LICENSE").read(),
-    include_package_data=True,
-    package_data={'': get_lib_files()},
+
+    license=open(
+        os.path.join(os.path.dirname(__file__), "LICENSE"),
+        encoding="utf-8",
+    ).read(),
+
     distclass=BinaryDistribution,
 )
