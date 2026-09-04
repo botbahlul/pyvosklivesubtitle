@@ -1,4 +1,20 @@
-pyinstaller --python=/usr/local/bin/python3.8 \
+folder1="./build"
+folder2="./dist"
+file1="./*.spec"
+
+if [ -d "$folder1" ]; then
+	rm -rf "$folder1"
+fi
+
+if [ -d "$folder2" ]; then
+	rm -rf "$folder2"
+fi
+
+if [ -f "$file1" ]; then
+	rm -f "$file1"
+fi
+
+/usr/local/bin/python3.10 -m PyInstaller \
 --add-data "./libvosk.so:." \
 --add-data "./streamlink/plugins/*:streamlink/plugins" \
 --add-data "./streamlink/*:streamlink" \
@@ -159,4 +175,3 @@ pyinstaller --python=/usr/local/bin/python3.8 \
 --onefile pyvls.pyw \
 --noconsole \
 --windowed 
-
