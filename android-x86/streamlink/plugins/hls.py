@@ -1,0 +1,42 @@
+import re
+from urllib.parse import urlparse
+
+from streamlink.logger import getLogger
+from streamlink.plugin import Plugin, pluginmatcher
+from streamlink.plugin.plugin import LOW_PRIORITY, parse_params
+from streamlink.stream.hls import HLSStream
+from streamlink.utils.url import update_scheme
+
+
+log = getLogger(__name__)
+
+
+@pluginmatcher(
+    re.compile(r"hls(?:variant)?://(?P<url>\S+)(?:\s(?P<params>.+))?$"),
+)
+@pluginmatcher(
+    priority=LOW_PRIORITY,
+    pattern=re.compile(
+        # URL with explicit scheme, or URL with implicit HTTPS scheme and a path
+        r"(?P<url>[^/]+/\S+\.m3u8(?:\?\S*)?)(?:\s(?P<params>.+))?$",
+        re.IGNORECASE,
+    ),
+)
+class HLSPlugin(Plugin):
+    def _get_streams(self):
+        data = self.match.groupdict()
+        url = update_scheme("https://", data.get("url", ""), force=False)
+        params = parse_params(data.get("params"))
+        log.debug("URL=%s; params=%r", url, params)
+
+        parsed = urlparse(url)
+        if parsed.scheme != "file" and not parsed.netloc:
+            log.error("Input URL is missing a host or input file path is missing the file:// scheme")
+            return
+
+        streams = HLSStream.parse_variant_playlist(self.session, url, **params)
+
+        return streams or {"live": HLSStream(self.session, url, **params)}
+
+
+__plugin__ = HLSPlugin
