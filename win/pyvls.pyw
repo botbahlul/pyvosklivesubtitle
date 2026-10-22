@@ -1,5 +1,6 @@
 from __future__ import absolute_import, print_function, unicode_literals
 import sys
+import platform
 import os
 import time
 from threading import Thread, Timer
@@ -32,8 +33,10 @@ import select
 import wave
 import audioop
 import math
+import traceback
 
-VERSION = '0.2.3'
+
+VERSION = '0.2.4'
 
 
 #============================================================== VOSK PART ==============================================================#
@@ -60,44 +63,97 @@ MODEL_PRE_URL = 'https://alphacephei.com/vosk/models/'
 MODEL_LIST_URL = MODEL_PRE_URL + 'model-list.json'
 #MODEL_DIRS = [os.getenv('VOSK_MODEL_PATH'), Path('/usr/share/vosk'), Path.home() / 'AppData/Local/vosk', Path.home() / '.cache/vosk']
 MODEL_DIRS = None
-if sys.platform == 'darwin':
-    MODEL_DIRS = [os.getenv('VOSK_MODEL_PATH'), Path('/usr/share/vosk'), Path.home() / 'Library/Caches/vosk']
-elif sys.platform == 'win32':
-    MODEL_DIRS = [os.getenv('VOSK_MODEL_PATH'), Path('/usr/share/vosk'), Path.home() / 'AppData/Local/vosk']
-else:
-    MODEL_DIRS = [os.getenv('VOSK_MODEL_PATH'), Path('/usr/share/vosk'), Path.home() / '.cache/vosk']
+
+
+def _build_model_dirs():
+    dirs = []
+
+    env_path = os.getenv('VOSK_MODEL_PATH')
+    if env_path:
+        dirs.append(Path(env_path))
+
+    if sys.platform == 'darwin':
+        dirs.append(Path.home() / 'Library/Caches/vosk')
+    elif sys.platform == 'win32':
+        dirs.append(Path.home() / 'AppData/Local/vosk')
+    elif sys.platform.startswith('linux'):
+        xdg_cache = os.getenv('XDG_CACHE_HOME')
+        cache_base = Path(xdg_cache) if xdg_cache else Path.home() / '.cache'
+        dirs.append(cache_base / 'vosk')
+        dirs.append(Path('/usr/share/vosk'))
+    else:
+        # generic fallback for other Unix-like platforms (BSD, etc.)
+        dirs.append(Path.home() / '.cache/vosk')
+
+    return dirs
+
+MODEL_DIRS = _build_model_dirs()
+#print(f"MODEL_DIRS : '{MODEL_DIRS}'")
+
+
+def _is_termux():
+    return (
+        os.path.isdir("/data/data/com.termux")
+        or "com.termux" in os.environ.get("PREFIX", "")
+        or "ANDROID_ROOT" in os.environ
+    )
+
 
 def libvoskdir():
+    machine = platform.machine().lower()
+
     if sys.platform == 'win32':
         libvosk = "libvosk.dll"
-    elif sys.platform == 'linux':
-        libvosk = "libvosk.so"
+
     elif sys.platform == 'darwin':
         libvosk = "libvosk.dyld"
+
+    elif sys.platform.startswith('linux') or sys.platform == 'android':
+        is_android = sys.platform == 'android' or _is_termux()
+
+        if is_android:
+            if 'aarch64' in machine or 'arm64' in machine:
+                libvosk = "libvosk_android-arm64-v8a.so"
+            elif 'armv7' in machine or 'armhf' in machine:
+                libvosk = "libvosk_android-armeabi-v7a.so"
+            elif 'x86_64' in machine:
+                libvosk = "libvosk_android-x86_64.so"
+            elif 'i686' in machine or 'i386' in machine or 'x86' in machine:
+                libvosk = "libvosk_android-x86.so"
+            else:
+                raise TypeError(f'Unsupported Android architecture: {machine}')
+        else:
+            if 'aarch64' in machine or 'arm64' in machine:
+                libvosk = "libvosk_linux_aarch64.so"
+            elif 'armv7' in machine or 'armhf' in machine:
+                libvosk = "libvosk_linux_armv7l.so"
+            else:
+                libvosk = "libvosk.so"
+
+    else:
+        raise TypeError('Unsupported platform')
+
+    # 2. Cari lokasi file tersebut di dalam PATH internal package
     dlldir = os.path.abspath(os.path.dirname(__file__))
     os.environ["PATH"] = dlldir + os.pathsep + os.environ['PATH']
     for path in os.environ["PATH"].split(os.pathsep):
         path = path.strip('"')
         if os.path.isfile(os.path.join(path, libvosk)):
-            return path
-    raise TypeError('libvosk not found')
+            return path, libvosk
+
+    raise TypeError(f'{libvosk} not found')
 
 
 def open_dll():
-    dlldir = libvoskdir()
+    dlldir, libvosk_filename = libvoskdir()
+    
     if sys.platform == 'win32':
-        # We want to load dependencies too
         os.environ["PATH"] = dlldir + os.pathsep + os.environ['PATH']
         if hasattr(os, 'add_dll_directory'):
             os.add_dll_directory(dlldir)
-        return _ffi.dlopen(os.path.join(dlldir, "libvosk.dll"))
-    elif sys.platform == 'linux':
-        return _ffi.dlopen(os.path.join(dlldir, "libvosk.so"))
-    elif sys.platform == 'darwin':
-        return _ffi.dlopen(os.path.join(dlldir, "libvosk.dyld"))
-    else:
-        raise TypeError("Unsupported platform")
-
+            
+    # ffi.dlopen sekarang otomatis memuat library Android yang tepat dengan aman
+    return _ffi.dlopen(os.path.join(dlldir, libvosk_filename))
 
 _c = open_dll()
 
@@ -107,6 +163,10 @@ def list_models():
     for model in response.json():
         print(model['name']) 
 
+def list_bigmodels():
+    response = requests.get(MODEL_LIST_URL)
+    for model in response.json():
+        print(model['name']) 
 
 def list_languages():
     response = requests.get(MODEL_LIST_URL)
@@ -125,8 +185,16 @@ class Model(object):
         if self._handle == _ffi.NULL:
             raise Exception("Failed to create a model")
 
+    #def __del__(self):
+    #    _c.vosk_model_free(self._handle)
+
     def __del__(self):
-        _c.vosk_model_free(self._handle)
+        # Only try to free the handle if it actually exists
+        handle = getattr(self, '_handle', None)
+        #if handle is not None:
+        if handle:
+            #_c.vosk_recognizer_free(handle)
+            _c.vosk_model_free(self._handle)
 
     def vosk_model_find_word(self, word):
         return _c.vosk_model_find_word(self._handle, word.encode('utf-8'))
@@ -206,6 +274,136 @@ class Model(object):
         return update_to
 
 
+class ModelBig(object):
+    def __init__(self, model_path=None, model_name=None, lang=None):
+        if model_path is not None:
+            self._handle = _c.vosk_model_new(model_path.encode('utf-8'))
+        else:
+            model_path = self.get_model_path(model_name, lang)
+            self._handle = _c.vosk_model_new(model_path.encode('utf-8'))
+        if self._handle == _ffi.NULL:
+            raise Exception("Failed to create a model")
+
+    #def __del__(self):
+    #    _c.vosk_model_free(self._handle)
+
+    def __del__(self):
+        # Only try to free the handle if it actually exists
+        handle = getattr(self, '_handle', None)
+        #if handle is not None:
+        if handle:
+            #_c.vosk_recognizer_free(handle)
+            _c.vosk_model_free(self._handle)
+
+    def vosk_model_find_word(self, word):
+        return _c.vosk_model_find_word(self._handle, word.encode('utf-8'))
+
+    def get_model_path(self, model_name, lang):
+        if model_name is None:
+            model_path = self.get_model_by_lang(lang)
+        else:
+            model_path = self.get_model_by_name(model_name)
+        return str(model_path)
+
+    # ---------- shared helpers (avoids duplication & leftover-variable bug) ----------
+
+    def _find_local_model(self, predicate):
+        # Search for files/folders in MODEL_DIRS that satisfy predicate(filename) -> bool. 
+        # Return the first Path that matches, or None if none exists
+        for directory in MODEL_DIRS:
+            if directory is None or not Path(directory).exists():
+                continue
+            for filename in os.listdir(directory):
+                if predicate(filename):
+                    return Path(directory, filename)
+        return None
+
+    def _get_default_download_dir(self):
+		# Specify the download destination folder explicitly from MODEL_DIRS, 
+		# make sure the folder exists (mkdir if not)
+        download_dir = next((d for d in MODEL_DIRS if d is not None), None)
+        if download_dir is None:
+            raise Exception("no valid model directory configured for download")
+        Path(download_dir).mkdir(parents=True, exist_ok=True)
+        return download_dir
+
+    # ---------- model search / resolution ----------
+
+    def get_model_by_name(self, model_name):
+        found = self._find_local_model(lambda filename: filename == model_name)
+        if found is not None:
+            return found
+
+        response = requests.get(MODEL_LIST_URL)
+        result_model = [model['name'] for model in response.json() if model['name'] == model_name]
+        if not result_model:
+            raise Exception("model name %s does not exist" % model_name)
+
+        download_dir = self._get_default_download_dir()
+        target_path = Path(download_dir, result_model[0])
+        self.download_model(target_path)
+        return target_path
+
+    def get_model_by_lang(self, lang):
+        pattern = f"vosk-model-{lang}"
+        found = self._find_local_model(lambda filename: match(pattern, filename))
+        if found is not None:
+            return found
+
+        response = requests.get(MODEL_LIST_URL)
+        result_model = [
+            model['name'] for model in response.json()
+            if model['lang'] == lang and model['obsolete'] == 'false'
+        ]
+        if not result_model:
+            raise Exception("lang %s does not exist" % lang)
+
+        download_dir = self._get_default_download_dir()
+        target_path = Path(download_dir, result_model[0])
+        self.download_model(target_path)
+        return target_path
+
+    # ---------- download ----------
+
+    def download_model(self, model_name):
+		# model_name here is the full Path (target_path) that has been specified 
+		# by caller (get_model_by_name / get_model_by_lang). Just make sure 
+		# the parent folder exists; do not recalculate from MODEL_DIRS here, 
+		# so it's not possible to "wrong folder" like the previous bug.
+        target_dir = model_name.parent
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        with tqdm(unit='B', unit_scale=True, unit_divisor=1024, miniters=1,
+                  desc=(MODEL_PRE_URL + str(model_name.name) + '.zip').split('/')[-1]) as t:
+
+            reporthook = self.download_progress_hook(t)
+
+            urlretrieve(
+                MODEL_PRE_URL + str(model_name.name) + '.zip',
+                str(model_name) + '.zip',
+                reporthook=reporthook,
+                data=None
+            )
+
+            t.total = t.n
+
+            with ZipFile(str(model_name) + '.zip', 'r') as model_ref:
+                model_ref.extractall(model_name.parent)
+            Path(str(model_name) + '.zip').unlink()
+
+    def download_progress_hook(self, t):
+        last_b = [0]
+
+        def update_to(b=1, bsize=1, tsize=None):
+            if tsize not in (None, -1):
+                t.total = tsize
+            displayed = t.update((b - last_b[0]) * bsize)
+            last_b[0] = b
+            return displayed
+
+        return update_to
+
+
 class SpkModel(object):
     def __init__(self, model_path):
         self._handle = _c.vosk_spk_model_new(model_path.encode('utf-8'))
@@ -230,8 +428,14 @@ class KaldiRecognizer(object):
         if self._handle == _ffi.NULL:
             raise Exception("Failed to create a recognizer")
 
+    #def __del__(self):
+    #    _c.vosk_recognizer_free(self._handle)
+
     def __del__(self):
-        _c.vosk_recognizer_free(self._handle)
+        # Only try to free the handle if it actually exists
+        handle = getattr(self, '_handle', None)
+        if handle is not None:
+            _c.vosk_recognizer_free(handle)
 
     def SetMaxAlternatives(self, max_alternatives):
         _c.vosk_recognizer_set_max_alternatives(self._handle, max_alternatives)
@@ -459,6 +663,183 @@ class VoskLanguage:
         self.code_of_name = dict(zip(self.list_names, self.list_codes))
         self.code_of_lang = dict(zip(self.list_langs, self.list_codes))
         self.code_of_model = dict(zip(self.list_models, self.list_codes))
+
+        self.dict = {
+                        'ca': 'Catalan',
+                        'zh': 'Chinese',
+                        'cs': 'Czech',
+                        'nl': 'Dutch',
+                        'en': 'English',
+                        'eo': 'Esperanto',
+                        'fr': 'French',
+                        'de': 'German',
+                        'hi': 'Hindi',
+                        'it': 'Italian',
+                        'ja': 'Japanese',
+                        'kk': 'Kazakh',
+                        'ko': 'Korean',
+                        'fa': 'Persian',
+                        'pl': 'Polish',
+                        'pt': 'Portuguese',
+                        'ru': 'Russian',
+                        'es': 'Spanish',
+                        'sv': 'Swedish',
+                        'tr': 'Turkish',
+                        'uk': 'Ukrainian',
+                        'vi': 'Vietnamese',
+					}
+
+    def get_lang_of_name(self, name):
+        return self.lang_of_name[name]
+
+    def get_lang_of_code(self, code):
+        return self.lang_of_code[code]
+
+    def get_lang_of_model(self, model):
+        return self.lang_of_model[model]
+
+    def get_model_of_name(self, name):
+        return self.model_of_name[name]
+
+    def get_model_of_code(self, code):
+        return self.model_of_code[code]
+
+    def get_model_of_lang(self, lang):
+        return self.model_of_lang[lang]
+
+    def get_name_of_model(self, model):
+        return self.name_of_model[model]
+
+    def get_name_of_code(self, code):
+        return self.name_of_code[code]
+
+    def get_name_of_lang(self, lang):
+        return self.name_of_lang[lang]
+
+    def get_code_of_name(self, name):
+        return self.code_of_name[name]
+
+    def get_code_of_lang(self, lang):
+        return self.code_of_lang[lang]
+
+    def get_code_of_model(self, model):
+        return self.code_of_model[model]
+
+class VoskLanguageBig:
+    def __init__(self):
+        self.list_langs = []
+        self.list_langs.append("ca")
+        self.list_langs.append("cn")
+        self.list_langs.append("cs")
+        self.list_langs.append("nl")
+        self.list_langs.append("en-us")
+        self.list_langs.append("eo")
+        self.list_langs.append("fr")
+        self.list_langs.append("de")
+        self.list_langs.append("hi")
+        self.list_langs.append("it")
+        self.list_langs.append("ja")
+        self.list_langs.append("kz")
+        self.list_langs.append("ko")
+        self.list_langs.append("fa")
+        self.list_langs.append("pl")
+        self.list_langs.append("pt")
+        self.list_langs.append("ru")
+        self.list_langs.append("es")
+        self.list_langs.append("sv")
+        self.list_langs.append("tr")
+        self.list_langs.append("ua")
+        self.list_langs.append("uz")
+        self.list_langs.append("vn")
+
+        self.list_bigmodels = []
+        self.list_bigmodels.append("vosk-model-small-ca-0.4")
+        self.list_bigmodels.append("vosk-model-cn-0.22")
+        self.list_bigmodels.append("vosk-model-small-cs-0.4-rhasspy")
+        self.list_bigmodels.append("vosk-model-nl-spraakherkenning-0.6")
+        self.list_bigmodels.append("vosk-model-en-us-0.22")
+        self.list_bigmodels.append("vosk-model-small-eo-0.42")
+        self.list_bigmodels.append("vosk-model-fr-0.22")
+        self.list_bigmodels.append("vosk-model-de-0.21")
+        self.list_bigmodels.append("vosk-model-hi-0.22")
+        self.list_bigmodels.append("vosk-model-it-0.22")
+        self.list_bigmodels.append("vosk-model-ja-0.22")
+        self.list_bigmodels.append("vosk-model-kz-0.42")
+        self.list_bigmodels.append("vosk-model-small-ko-0.22")
+        self.list_bigmodels.append("vosk-model-fa-0.42")
+        self.list_bigmodels.append("vosk-model-small-pl-0.22")
+        self.list_bigmodels.append("vosk-model-pt-fb-v0.1.1-20220516_2113")
+        self.list_bigmodels.append("vosk-model-ru-0.42")
+        self.list_bigmodels.append("vosk-model-es-0.42")
+        self.list_bigmodels.append("vosk-model-small-sv-rhasspy-0.15")
+        self.list_bigmodels.append("vosk-model-small-tr-0.3")
+        self.list_bigmodels.append("vosk-model-uk-v3")
+        self.list_bigmodels.append("vosk-model-small-uz-0.22")
+        self.list_bigmodels.append("vosk-model-vn-0.4")
+
+        self.list_codes = []
+        self.list_codes.append("ca")
+        self.list_codes.append("zh")
+        self.list_codes.append("cs")
+        self.list_codes.append("nl")
+        self.list_codes.append("en")
+        self.list_codes.append("eo")
+        self.list_codes.append("fr")
+        self.list_codes.append("de")
+        self.list_codes.append("hi")
+        self.list_codes.append("it")
+        self.list_codes.append("ja")
+        self.list_codes.append("kk")
+        self.list_codes.append("ko")
+        self.list_codes.append("fa")
+        self.list_codes.append("pl")
+        self.list_codes.append("pt")
+        self.list_codes.append("ru")
+        self.list_codes.append("es")
+        self.list_codes.append("sv")
+        self.list_codes.append("tr")
+        self.list_codes.append("uk")
+        self.list_codes.append("vi")
+
+        self.list_names = []
+        self.list_names.append("Catalan")
+        self.list_names.append("Chinese")
+        self.list_names.append("Czech")
+        self.list_names.append("Dutch")
+        self.list_names.append("English")
+        self.list_names.append("Esperanto")
+        self.list_names.append("French")
+        self.list_names.append("German")
+        self.list_names.append("Hindi")
+        self.list_names.append("Italian")
+        self.list_names.append("Japanese")
+        self.list_names.append("Kazakh")
+        self.list_names.append("Korean")
+        self.list_names.append("Persian")
+        self.list_names.append("Polish")
+        self.list_names.append("Portuguese")
+        self.list_names.append("Russian")
+        self.list_names.append("Spanish")
+        self.list_names.append("Swedish")
+        self.list_names.append("Turkish")
+        self.list_names.append("Ukrainian")
+        self.list_names.append("Vietnamese")
+
+        self.lang_of_name = dict(zip(self.list_names, self.list_langs))
+        self.lang_of_code = dict(zip(self.list_codes, self.list_langs))
+        self.lang_of_model = dict(zip(self.list_bigmodels, self.list_langs))
+
+        self.model_of_name = dict(zip(self.list_names, self.list_bigmodels))
+        self.model_of_code = dict(zip(self.list_codes, self.list_bigmodels))
+        self.model_of_lang = dict(zip(self.list_langs, self.list_bigmodels))
+
+        self.name_of_model = dict(zip(self.list_bigmodels, self.list_names))
+        self.name_of_code = dict(zip(self.list_codes, self.list_names))
+        self.name_of_lang = dict(zip(self.list_langs, self.list_names))
+
+        self.code_of_name = dict(zip(self.list_names, self.list_codes))
+        self.code_of_lang = dict(zip(self.list_langs, self.list_codes))
+        self.code_of_model = dict(zip(self.list_bigmodels, self.list_codes))
 
         self.dict = {
                         'ca': 'Catalan',
@@ -1371,14 +1752,26 @@ class WavConverter:
                 self.error_messages_callback("Cancelling all tasks")
             else:
                 print("Cancelling all tasks")
-            return
+            return None, None
+
 
         except Exception as e:
+            # If the file media_filepath corrupt, ffprobe/ffmpeg will trigger exception here
+            error_msg = f"Error processing media file (might be corrupted): {e}"
             if self.error_messages_callback:
-                self.error_messages_callback(e)
+                self.error_messages_callback(error_msg)
             else:
-                print(e)
-            return
+                print(error_msg)
+            
+            # Remove temporary file
+            try:
+                temp.close()
+                if os.path.exists(temp.name):
+                    os.remove(temp.name)
+            except:
+                pass
+
+            return None, None
 
 
 class VoskRecognizer:
@@ -1437,9 +1830,76 @@ class VoskRecognizer:
         except Exception as e:
             if self.error_messages_callback:
                 self.error_messages_callback(e)
+                self.error_messages_callback("--- REAL ERROR DURING INITIALIZATION ---", file=sys.stderr)
+                traceback.print_exc()
             else:
                 print(e)
+                print("--- REAL ERROR DURING INITIALIZATION ---", file=sys.stderr)
+                traceback.print_exc()
 
+
+class VoskRecognizerBig:
+    def __init__(self, loglevel=-1, language_code="en", block_size=1024, progress_callback=None,  error_messages_callback=None):
+        self.loglevel = loglevel
+        self.language_code = language_code
+        self.block_size = block_size
+        self.progress_callback = progress_callback
+        self.error_messages_callback = error_messages_callback
+
+    def __call__(self, wav_filepath):
+        try:
+            SetLogLevel(self.loglevel)
+            reader = wave.open(wav_filepath)
+            rate = reader.getframerate()
+            total_duration = reader.getnframes() / rate
+            vosk_language = VoskLanguageBig()
+            model = ModelBig(lang=vosk_language.lang_of_code[self.language_code])
+            rec = KaldiRecognizer(model, rate)
+            rec.SetWords(True)
+            regions = []
+            transcripts = []
+            media_file_display_name = os.path.basename(wav_filepath).split('/')[-1]
+            info = f"Creating '{media_file_display_name}' transcriptions"
+            start_time = time.time()
+        
+            while True:
+                block = reader.readframes(self.block_size)
+                if not block:
+                    break
+                if rec.AcceptWaveform(block):
+                    recResult_json = json.loads(rec.Result())
+                    if 'result' in recResult_json:
+                        result = recResult_json["result"]
+                        text = recResult_json["text"]
+                        region_start_time = result[0]["start"]
+                        region_end_time = result[len(result)-1]["end"]
+                        progress = int(int(region_end_time)*100/total_duration)
+                        regions.append((region_start_time, region_end_time))
+                        transcripts.append(text)
+                        if self.progress_callback:
+                            self.progress_callback(info, media_file_display_name, progress, start_time)
+
+            if self.progress_callback:
+                self.progress_callback(info, media_file_display_name, 100, start_time)
+
+            return regions, transcripts
+
+        except KeyboardInterrupt:
+            if self.error_messages_callback:
+                self.error_messages_callback("Cancelling all tasks")
+            else:
+                print("Cancelling all tasks")
+            return
+
+        except Exception as e:
+            if self.error_messages_callback:
+                self.error_messages_callback(e)
+                self.error_messages_callback("--- REAL ERROR DURING INITIALIZATION ---", file=sys.stderr)
+                traceback.print_exc()
+            else:
+                print(e)
+                print("--- REAL ERROR DURING INITIALIZATION ---", file=sys.stderr)
+                traceback.print_exc()
 
 class SentenceTranslator(object):
     def __init__(
@@ -2167,10 +2627,14 @@ def callback(indata, frames, time, status):
     q.put(bytes(indata))
 
 
-def worker_recognize(src, dst, error_messages_callback=None):
+def worker_recognize(src, error_messages_callback=None):
     global main_window, recognizing, text, Device, SampleRate, wav_filepath, regions, transcriptions, \
         start_button_click_time, ffmpeg_start_run_time, tmp_recorded_streaming_filepath, get_tmp_recorded_streaming_filepath_time, \
         loading_time, first_streaming_duration_recorded
+
+    #print("worker_recognize")
+    #print(f"src = {src}")
+    #print(f"main_window['-USE-BIG-MODEL-'].get() = {main_window['-USE-BIG-MODEL-'].get()}")
 
     p = 0
     f = 0
@@ -2189,7 +2653,7 @@ def worker_recognize(src, dst, error_messages_callback=None):
     #print("time_value_filepath = {}".format(time_value_filepath))
     #print("os.path.isfile(time_value_filepath) = {}".format(os.path.isfile(time_value_filepath)))
     if os.path.isfile(time_value_filepath):
-        time_value_file = open(time_value_filepath, "r")
+        time_value_file = open(time_value_filepath, "r", encoding="utf-8", errors="ignore")
         time_value_string = time_value_file.read()
         if time_value_string:
             first_streaming_duration_recorded = datetime.strptime(time_value_string, "%H:%M:%S.%f") - datetime(1900, 1, 1)
@@ -2206,14 +2670,19 @@ def worker_recognize(src, dst, error_messages_callback=None):
             #print(f"SampleRate = {SampleRate}")
 
         if wav_filepath:
-            dump_fn = open(wav_filepath, "wb")
+            dump_fn = open(wav_filepath, "wb", encoding="utf-8", errors="ignore")
         else:
             dump_fn = None
 
-        vosk_language = VoskLanguage()
-        model = Model(lang=vosk_language.lang_of_code[src])
+        if main_window['-USE-BIG-MODEL-'].get() == True:
+            vosk_language = VoskLanguageBig()
+            model = ModelBig(lang=vosk_language.lang_of_code[src])
+        else:
+            vosk_language = VoskLanguage()
+            model = Model(lang=vosk_language.lang_of_code[src])
 
         with sd.RawInputStream(samplerate=SampleRate, blocksize=8192, device=Device, dtype="int16", channels=1, callback=callback):
+        #with sd.RawInputStream(samplerate=SampleRate, blocksize=8192, device=Device, dtype="int16", channels=2, callback=callback):
 
             rec = KaldiRecognizer(model, SampleRate)
 
@@ -2266,7 +2735,7 @@ def worker_recognize(src, dst, error_messages_callback=None):
 
                             tmp_src_txt_transcription_filename = f"record.{src}.txt"
                             tmp_src_txt_transcription_filepath = os.path.join(tempfile.gettempdir(), tmp_src_txt_transcription_filename)
-                            tmp_src_txt_transcription_file = open(tmp_src_txt_transcription_filepath, "a")
+                            tmp_src_txt_transcription_file = open(tmp_src_txt_transcription_filepath, "a", encoding="utf-8", errors="ignore")
                             tmp_src_txt_transcription_file.write(time_stamp_string + " " + text + "\n")
                             tmp_src_txt_transcription_file.close()
 
@@ -2282,7 +2751,8 @@ def worker_recognize(src, dst, error_messages_callback=None):
                             main_window.write_event_value('-EVENT-PARTIAL-RESULTS-', text)
 
                             # IF RECORD STREAMING
-                            if main_window['-URL-'].get() != (None or "") and main_window['-RECORD-STREAMING-'].get() == True:
+                            #if main_window['-URL-'].get() != (None or "") and main_window['-RECORD-STREAMING-'].get() == True:
+                            if main_window['-URL-'].get() and main_window['-RECORD-STREAMING-'].get():
 
                                 if ffmpeg_start_run_time and l == 0:
 
@@ -2305,7 +2775,7 @@ def worker_recognize(src, dst, error_messages_callback=None):
                                         #print("time_value_filepath = {}".format(time_value_filepath))
                                         #print("os.path.isfile(time_value_filepath) = {}".format(os.path.isfile(time_value_filepath)))
                                         if os.path.isfile(time_value_filepath):
-                                            time_value_file = open(time_value_filepath, "r")
+                                            time_value_file = open(time_value_filepath, "r", encoding="utf-8", errors="ignore")
                                             time_value_string = time_value_file.read()
                                             if time_value_string:
                                                 first_streaming_duration_recorded = datetime.strptime(time_value_string, "%H:%M:%S.%f") - datetime(1900, 1, 1)
@@ -2344,7 +2814,7 @@ def worker_recognize(src, dst, error_messages_callback=None):
                     dump_fn.write(data)
 
     except KeyboardInterrupt:
-        recognizing==False
+        recognizing = False
         rec = None
         data = None
         #sys.exit(0)
@@ -2403,13 +2873,25 @@ def GoogleTranslate(text, src, dst, timeout=30, error_messages_callback=None):
 def worker_timed_translate(src, dst):
     global main_window, recognizing
 
+    #print("worker_timed_translate")
+    #print(f"src = {src}")
+    #print(f"dst = {dst}")
+
     while (recognizing==True):
+
         if not recognizing:
             break
+
         partial_result_filename = "partial_result"
         partial_result_filepath = os.path.join(tempfile.gettempdir(), partial_result_filename)
+
+        '''
         if os.path.isfile(partial_result_filepath):
-            partial_result_file = open(partial_result_filepath, "r")
+            #partial_result_file = open(partial_result_filepath, "r")
+            # Pilihan 1: Tetap gunakan utf-8 tapi abaikan karakter yang rusak (Direkomendasikan agar tidak crash)
+            partial_result_file = open(partial_result_filepath, "r", encoding="utf-8", errors="ignore")
+            # Pilihan 2: Jika file tersebut ditulis dari sistem Windows lama, coba encoding cp1252
+            # partial_result_file = open(partial_result_filepath, "r", encoding="cp1252")
             partial_result = partial_result_file.read()
             sentence_translator = SentenceTranslator(src=src, dst=dst, endpoint_config=endpoint_config, error_messages_callback=show_error_messages)
             n_words = len(partial_result.split())
@@ -2417,6 +2899,24 @@ def worker_timed_translate(src, dst):
                 #translated_text = GoogleTranslate(partial_result, src, dst, error_messages_callback=show_error_messages)
                 translated_text = sentence_translator(partial_result)
                 main_window.write_event_value('-EVENT-VOICE-TRANSLATED-', translated_text)
+        '''
+
+        if os.path.isfile(partial_result_filepath):
+            # Using 'with' automatically close the file after read
+            try:
+                #partial_result_file = open(partial_result_filepath, "r", encoding="utf-8", errors="ignore")
+                with open(partial_result_filepath, "r", encoding="utf-8", errors="ignore") as partial_result_file:
+                    partial_result = partial_result_file.read()
+            except Exception as e:
+                # Avoiding crash if the file was being written by thread or another process
+                continue 
+
+            sentence_translator = SentenceTranslator(src=src, dst=dst, endpoint_config=endpoint_config, error_messages_callback=show_error_messages)
+            n_words = len(partial_result.split())
+            if partial_result and n_words % 3 == 0:
+                translated_text = sentence_translator(partial_result)
+                main_window.write_event_value('-EVENT-VOICE-TRANSLATED-', translated_text)
+
 
 
 def stop_thread(thread):
@@ -2433,6 +2933,15 @@ def stop_thread(thread):
         ctypes.pythonapi.PyThreadState_SetAsyncExc(thread.ident, None)
         main_window.write_event_value("-EXCEPTION-", "PyThreadState_SetAsyncExc failed")
         #raise SystemError("PyThreadState_SetAsyncExc failed")
+
+
+def stop_worker(thread, stop_event):
+    if thread is None:
+        return
+
+    if thread.is_alive():
+        stop_event.set()
+        thread.join(timeout=2.0)
 
 
 def time_string_to_timedelta(time_string):
@@ -2508,6 +3017,9 @@ def is_valid_url(url):
 def record_streaming_windows(hls_url, filename):
     global main_window, ffmpeg_start_run_time, first_streaming_duration_recorded, recognizing
 
+    #print("")
+    #print("record_streaming_windows")
+
     #ffmpeg_cmd = ['ffmpeg', '-y', '-i', hls_url,  '-movflags', '+frag_keyframe+separate_moof+omit_tfhd_offset+empty_moov', '-fflags', 'nobuffer', '-loglevel', 'error',  f'{filename}']
     ffmpeg_cmd = ['ffmpeg', '-y', '-i', f'{hls_url}',  '-movflags', '+frag_keyframe+separate_moof+omit_tfhd_offset+empty_moov', '-fflags', 'nobuffer', f'{filename}']
 
@@ -2519,9 +3031,10 @@ def record_streaming_windows(hls_url, filename):
     i = 0
     j = 0
 
+    #print("RECORDING")
+
     process = subprocess.Popen(ffmpeg_cmd, stderr=subprocess.PIPE, creationflags=subprocess.CREATE_NO_WINDOW)
     #process = subprocess.Popen(ffmpeg_cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, shell=True, creationflags=subprocess.CREATE_NO_WINDOW)
-
 
     msg = "RECORDING"
     main_window.write_event_value('-EVENT-THREAD-RECORD-STREAMING-STATUS-', msg)
@@ -2552,7 +3065,7 @@ def record_streaming_windows(hls_url, filename):
 
                     time_value_filename = "time_value"
                     time_value_filepath = os.path.join(tempfile.gettempdir(), time_value_filename)
-                    time_value_file = open(time_value_filepath, "w")
+                    time_value_file = open(time_value_filepath, "w", encoding="utf-8", errors="ignore")
                     time_value_file.write(time_str)
                     time_value_file.close()
 
@@ -2566,6 +3079,9 @@ def record_streaming_windows(hls_url, filename):
 # subprocess.Popen(ffmpeg_cmd) THREAD BEHAVIOR IS DIFFERENT IN LINUX
 def record_streaming_linux(url, output_file):
     global main_window, recognizing, ffmpeg_start_run_time, first_streaming_duration_recorded
+
+    #print("")
+    #print("record_streaming_linux")
 
     #ffmpeg_cmd = ['ffmpeg', '-y', '-i', url, '-c', 'copy', '-bsf:a', 'aac_adtstoasc', '-f', 'mp4', output_file]
     ffmpeg_cmd = ['ffmpeg', '-y', '-i', f'{url}',  '-movflags', '+frag_keyframe+separate_moof+omit_tfhd_offset+empty_moov', '-fflags', 'nobuffer', f'{output_file}']
@@ -2622,7 +3138,7 @@ def record_streaming_linux(url, output_file):
                     #print("writing time_value")
                     time_value_filename = "time_value"
                     time_value_filepath = os.path.join(tempfile.gettempdir(), time_value_filename)
-                    time_value_file = open(time_value_filepath, "w")
+                    time_value_file = open(time_value_filepath, "w", encoding="utf-8", errors="ignore")
                     time_value_file.write(str(time_value))
                     time_value_file.close()
                     #print("time_value = {}".format(time_value))
@@ -2757,12 +3273,24 @@ def stop_record_streaming_linux():
     msg = "TERMINATED"
     if main_window: main_window.write_event_value('-EVENT-THREAD-RECORD-STREAMING-STATUS-', msg)
 
-    ffmpeg_pid = subprocess.check_output(['pgrep', '-f', 'ffmpeg']).strip()
-    if ffmpeg_pid:
-        subprocess.Popen(['kill', ffmpeg_pid])
-    else:
+    try:
+        ffmpeg_pids = subprocess.check_output(['pgrep', '-f', 'ffmpeg'], text=True).strip().split()
+    
+        if ffmpeg_pids:
+            subprocess.Popen(['kill'] + ffmpeg_pids)
+
+    except subprocess.CalledProcessError:
+        # pgrep mengembalikan error code jika tidak ada proses yang cocok
         msg = 'FFMPEG IS NOT RUNNING'
         if main_window: main_window.write_event_value('-EVENT-THREAD-RECORD-STREAMING-STATUS-', msg)
+
+    #ffmpeg_pid = subprocess.check_output(['pgrep', '-f', 'ffmpeg']).strip()
+    #ffmpeg_pids = subprocess.check_output(['pgrep', '-f', 'ffmpeg'], text=True).strip().split()
+    #if ffmpeg_pid:
+    #    subprocess.Popen(['kill', ffmpeg_pid])
+    #else:
+    #    msg = 'FFMPEG IS NOT RUNNING'
+    #    if main_window: main_window.write_event_value('-EVENT-THREAD-RECORD-STREAMING-STATUS-', msg)
 
 
 def is_same_language(lang1, lang2):
@@ -2981,6 +3509,9 @@ def vosk_transcribe(src, dst, media_filepath, subtitle_format):
     main_window.write_event_value('-EVENT-TRANSCRIBE-UPDATE-PROGRESS-BAR-', (media_file_display_name, info, total, "0%", 0, time_str))
 
     wav_converter = WavConverter(progress_callback=show_progress, error_messages_callback=show_error_messages)
+    if wav_converter is None or wav_converter == (None, None):
+        print("Error: Could not convert media file to WAV. Skipping transcription.")
+
     wav_filepath, SampleRate = wav_converter(media_filepath)
 
     window_key = '-OUTPUT-MESSAGES-'
@@ -3006,18 +3537,24 @@ def vosk_transcribe(src, dst, media_filepath, subtitle_format):
         append_flag = True
         main_window.write_event_value('-EVENT-TRANSCRIBE-SEND-MESSAGES-', (window_key, msg, append_flag))
 
-        vosk_recognizer = VoskRecognizer(loglevel=-1, language_code=src, block_size=4096, progress_callback=show_progress)
+        if main_window['-USE-BIG-MODEL-'].get() == True:
+            vosk_language = VoskLanguageBig()
+            vosk_recognizer = VoskRecognizerBig(loglevel=-1, language_code=src, block_size=4096, progress_callback=show_progress)
+        else:
+            vosk_language = VoskLanguage()
+            vosk_recognizer = VoskRecognizer(loglevel=-1, language_code=src, block_size=4096, progress_callback=show_progress)
+        
         regions, transcriptions = vosk_recognizer(wav_filepath)
 
         regions_filename = "regions"
         regions_filepath = os.path.join(tempfile.gettempdir(), regions_filename)
-        regions_file = open(regions_filepath, "w")
+        regions_file = open(regions_filepath, "w", encoding="utf-8", errors="ignore")
         json.dump(regions, regions_file)
         regions_file.close()
         
         transcriptions_filename = "transcriptions"
         transcriptions_filepath = os.path.join(tempfile.gettempdir(), transcriptions_filename)
-        transcriptions_file = open(transcriptions_filepath, "w")
+        transcriptions_file = open(transcriptions_filepath, "w", encoding="utf-8", errors="ignore")
         json.dump(transcriptions, transcriptions_file)
         transcriptions_file.close()
 
@@ -3096,7 +3633,7 @@ def vosk_transcribe(src, dst, media_filepath, subtitle_format):
 
             if not_transcribing: return
 
-            translation_writer = SubtitleWriter(created_regions, translated_transcription, subtitle_format, error_messages_callback=show_error_messages)
+            translation_writer = SubtitleWriter(created_regions, translated_transcriptions, subtitle_format, error_messages_callback=show_error_messages)
             translation_writer.write(dst_subtitle_filepath)
 
             if not_transcribing: return
@@ -3145,12 +3682,12 @@ def vosk_transcribe(src, dst, media_filepath, subtitle_format):
 
         time_stamp_string = start_time_str + "-" + end_time_str
 
-        tmp_src_txt_transcription_file = open(tmp_src_txt_transcription_filepath, "a")
+        tmp_src_txt_transcription_file = open(tmp_src_txt_transcription_filepath, "a", encoding="utf-8", errors="ignore")
         tmp_src_txt_transcription_file.write(time_stamp_string + " " + created_subtitles[i] + "\n")
         tmp_src_txt_transcription_file.close()
 
         if (not is_same_language(src, dst)):
-            tmp_dst_txt_transcription_file = open(tmp_dst_txt_transcription_filepath, "a")
+            tmp_dst_txt_transcription_file = open(tmp_dst_txt_transcription_filepath, "a", encoding="utf-8", errors="ignore")
             tmp_dst_txt_transcription_file.write(time_stamp_string + " " + translated_transcriptions[i] + "\n")
             tmp_dst_txt_transcription_file.close()
 
@@ -3175,7 +3712,7 @@ def vosk_transcribe(src, dst, media_filepath, subtitle_format):
 
     transcribe_is_done_filename = "transcribe_is_done"
     transcribe_is_done_filepath = os.path.join(tempfile.gettempdir(), transcribe_is_done_filename)
-    transcribe_is_done_file = open(transcribe_is_done_filepath, "w")
+    transcribe_is_done_file = open(transcribe_is_done_filepath, "w", encoding="utf-8", errors="ignore")
     transcribe_is_done_file.write("True")
     transcribe_is_done_file.close()
 
@@ -3205,13 +3742,13 @@ def save_temporary_transcriptions(src, dst, subtitle_format):
     # SAVING REGIONS AND TRANSCRIPTIONS VALUES IN JSON FORMAT
     regions_filename = "regions"
     regions_filepath = os.path.join(tempfile.gettempdir(), regions_filename)
-    regions_file = open(regions_filepath, "w")
+    regions_file = open(regions_filepath, "w", encoding="utf-8", errors="ignore")
     json.dump(regions, regions_file)
     regions_file.close()
         
     transcriptions_filename = "transcriptions"
     transcriptions_filepath = os.path.join(tempfile.gettempdir(), transcriptions_filename)
-    transcriptions_file = open(transcriptions_filepath, "w")
+    transcriptions_file = open(transcriptions_filepath, "w", encoding="utf-8", errors="ignore")
     json.dump(transcriptions, transcriptions_file)
     transcriptions_file.close()
 
@@ -3279,7 +3816,7 @@ def save_temporary_transcriptions(src, dst, subtitle_format):
         # SAVING TRANSLATED TRANSCRIPTIONS VALUES IN JSON FORMAT
         translated_transcriptions_filename = "translated_transcriptions"
         translated_transcriptions_filepath = os.path.join(tempfile.gettempdir(), translated_transcriptions_filename)
-        translated_transcriptions_file = open(translated_transcriptions_filepath, "w")
+        translated_transcriptions_file = open(translated_transcriptions_filepath, "w", encoding="utf-8", errors="ignore")
         json.dump(translated_transcriptions, translated_transcriptions_file)
         translated_transcriptions_file.close()
 
@@ -3342,12 +3879,12 @@ def save_as_declared_subtitle_filename(declared_src_subtitle_filename, src, dst)
     
     while True:
         if os.path.isfile(regions_filepath):
-            regions_file = open(regions_filepath, "r")
+            regions_file = open(regions_filepath, "r", encoding="utf-8", errors="ignore")
             regions = tuple(json.load(regions_file))
             regions_file.close()
 
         if os.path.isfile(transcriptions_filepath):
-            transcriptions_file = open(transcriptions_filepath, "r")
+            transcriptions_file = open(transcriptions_filepath, "r", encoding="utf-8", errors="ignore")
             transcriptions = tuple(json.load(transcriptions_file))
             transcriptions_file.close()
 
@@ -3376,7 +3913,7 @@ def save_as_declared_subtitle_filename(declared_src_subtitle_filename, src, dst)
         if not is_same_language(src, dst):
 
             if os.path.isfile(translated_transcriptions_filepath):
-                translated_transcriptions_file = open(translated_transcriptions_filepath, "r")
+                translated_transcriptions_file = open(translated_transcriptions_filepath, "r", encoding="utf-8", errors="ignore")
                 translated_transcriptions = tuple(json.load(translated_transcriptions_file))
                 translated_transcriptions_file.close()
 
@@ -3696,6 +4233,7 @@ def set_clipboard_text(text):
         pass
 
 
+
 #------------------------------------------------------------ MAIN PROGRAM ------------------------------------------------------------#
 
 
@@ -3744,6 +4282,10 @@ def main():
                 [sg.Text('', expand_x=True, expand_y=True),
                  sg.Button('SAVE RECORDED STREAMING', size=(31,1), expand_x=True, expand_y=True, key='-EVENT-SAVE-RECORDED-STREAMING-'),
                  sg.Text('', expand_x=True, expand_y=True)],
+                [sg.Checkbox("Use big model if exists", size=(23, 1), key='-USE-BIG-MODEL-', enable_events=True),
+                 sg.Text('Model being used :' ),
+                 sg.Text('', expand_x=True, key='-USED-MODEL-'),
+                ],
                 [sg.Text('Audio language', size=(10, 1), expand_x=True, expand_y=True),
                  sg.Combo(list(vosk_language.code_of_name), size=(12, 1), default_value="English", enable_events=True, expand_x=True, expand_y=True, key='-SRC-')],
                 [sg.Multiline(size=(96, 5), expand_x=True, expand_y=True, right_click_menu=['&Edit', ['&Copy','&Paste',]], key='-ML-SRC-RESULTS-')],
@@ -3780,7 +4322,7 @@ def main():
     src_filename = "src"
     src_filepath = os.path.join(tempfile.gettempdir(), src_filename)
     if os.path.isfile(src_filepath):
-        src_file = open(src_filepath, "r")
+        src_file = open(src_filepath, "r", encoding="utf-8", errors="ignore")
         last_selected_src = src_file.read()
 
     if last_selected_src:
@@ -3791,7 +4333,7 @@ def main():
     dst_filename = "dst"
     dst_filepath = os.path.join(tempfile.gettempdir(), dst_filename)
     if os.path.isfile(dst_filepath):
-        dst_file = open(dst_filepath, "r")
+        dst_file = open(dst_filepath, "r", encoding="utf-8", errors="ignore")
         last_selected_dst = dst_file.read()
 
     if last_selected_dst:
@@ -3870,6 +4412,8 @@ def main():
 
     parser = argparse.ArgumentParser(add_help=False)
 
+    parser.add_argument('-B', '--big-models', action='store_true', help="Use big models if exist")
+
     if last_selected_src:
         parser.add_argument('-S', '--src-language', help="Spoken language", default=last_selected_src)
     else:
@@ -3915,7 +4459,7 @@ def main():
     else:
         src = args.src_language
         last_selected_src = src
-        src_file = open(src_filepath, "w")
+        src_file = open(src_filepath, "w", encoding="utf-8", errors="ignore")
         src_file.write(src)
         src_file.close()
 
@@ -3925,7 +4469,7 @@ def main():
     else:
         dst = args.dst_language
         last_selected_dst = dst
-        dst_file = open(dst_filepath, "w")
+        dst_file = open(dst_filepath, "w", encoding="utf-8", errors="ignore")
         dst_file.write(dst)
         dst_file.close()
 
@@ -3949,7 +4493,7 @@ def main():
 
     if args.audio_filename:
         wav_filepath = args.audio_filename
-        dump_fn = open(args.audio_filename, "wb")
+        dump_fn = open(args.audio_filename, "wb", encoding="utf-8", errors="ignore")
     else:
         dump_fn = None
 
@@ -3969,15 +4513,18 @@ def main():
         else:
             saved_recorded_streaming_filename = args.video_filename
 
-    # ============================================================
-    # TEST ENDPOINT ONCE
-    # ============================================================
+    if args.src_language and args.dst_language:
+        # ============================================================
+        # TEST ENDPOINT ONCE
+        # ============================================================
 
-    endpoint_config = None
-    endpoint_config = test_translation_endpoint(args.src_language,args.dst_language,error_messages_callback=show_error_messages)
-    if endpoint_config is None:
-        print("ERROR: No working Google Translate endpoint.")
-        return 1
+        endpoint_config = None
+        endpoint_config = test_translation_endpoint(args.src_language,args.dst_language,error_messages_callback=show_error_messages)
+        if endpoint_config is None:
+            show_error_messages("ERROR: No working Google Translate endpoint!")
+            return 1
+
+    model_name = vosk_language.model_of_code[src]
 
 
 #------------------------------------ REMAINING GUI PARTS NEEDED TO LOAD AT LAST BEFORE MAIN LOOP ------------------------------------#
@@ -4015,14 +4562,30 @@ def main():
 
     main_window['-URL-'].update("")
     main_window['-RECORD-STREAMING-'].update(False)
+    main_window['-USE-BIG-MODEL-'].update(False)
+    main_window['-USED-MODEL-'].update(model_name)
 
     if args.src_language:
         combo_src = vosk_language.name_of_code[args.src_language]
         main_window['-SRC-'].update(combo_src)
+        model_name = vosk_language.model_of_code[vosk_language.code_of_name[str(main_window['-SRC-'].get())]]
+        main_window['-USED-MODEL-'].update(model_name)
 
     if args.dst_language:
         combo_dst = google_language.name_of_code[args.dst_language]
         main_window['-DST-'].update(combo_dst)
+
+    if args.big_models:
+        main_window['-USE-BIG-MODEL-'].update(True)
+        vosk_language = VoskLanguageBig()
+        vosk_recognizer = VoskRecognizerBig(loglevel=-1, language_code=args.src_language, block_size=4096, progress_callback=show_progress)
+    else:
+        main_window['-USE-BIG-MODEL-'].update(False)
+        vosk_language = VoskLanguage()
+        vosk_recognizer = VoskRecognizer(loglevel=-1, language_code=args.src_language, block_size=4096, progress_callback=show_progress)
+
+    model_name = vosk_language.model_of_code[vosk_language.code_of_name[str(main_window['-SRC-'].get())]]
+    main_window['-USED-MODEL-'].update(model_name)
 
     if args.url:
         is_valid_url_streaming = is_streaming_url(args.url)
@@ -4058,6 +4621,8 @@ def main():
         vosk_cache_dir = os.path.expanduser('~/.cache/vosk')
     elif sys.platform == "darwin":
         vosk_cache_dir = os.path.expanduser('~/Library/Caches/vosk')
+    else:
+        vosk_cache_dir = os.path.expanduser('~/.cache/vosk')
 
     vosk_model_dir = vosk_cache_dir + os.sep + vosk_language.model_of_code[src]
 
@@ -4129,18 +4694,21 @@ def main():
         window, event, values = sg.read_all_windows()
 
         src = vosk_language.code_of_name[str(main_window['-SRC-'].get())]
+        model_name = vosk_language.model_of_code[src]
+        main_window['-USED-MODEL-'].update(model_name)
         last_selected_src = src
-        src_file = open(src_filepath, "w")
+        src_file = open(src_filepath, "w", encoding="utf-8", errors="ignore")
         src_file.write(src)
         src_file.close()
 
         dst = google_language.code_of_name[str(main_window['-DST-'].get())]
         last_selected_dst = dst
-        dst_file = open(dst_filepath, "w")
+        dst_file = open(dst_filepath, "w", encoding="utf-8", errors="ignore")
         dst_file.write(dst)
         dst_file.close()
 
         vosk_model_dir = vosk_cache_dir + os.sep + vosk_language.model_of_code[src]
+
         if not os.path.isdir(vosk_model_dir):
             FONT = ("Helvetica", 10)
             sg.set_options(font=FONT)
@@ -4201,14 +4769,106 @@ def main():
             #download_vosk_model(src, url, vosk_cache_dir)
 
 
-        if event == 'right_click':
+        if event == '-SRC-':
+
+            src = vosk_language.code_of_name[str(main_window['-SRC-'].get())]
+            dst = google_language.code_of_name[str(main_window['-DST-'].get())]
+
+            if values['-USE-BIG-MODEL-']:
+                vosk_language = VoskLanguageBig()
+                vosk_recognizer = VoskRecognizerBig(loglevel=-1, language_code=src, block_size=4096, progress_callback=show_progress)
+            else:
+                vosk_language = VoskLanguage()
+                vosk_recognizer = VoskRecognizer(loglevel=-1, language_code=src, block_size=4096, progress_callback=show_progress)
+
+            model_name = vosk_language.model_of_code[src]
+            main_window['-USED-MODEL-'].update(model_name)
+
+            last_selected_src = src
+            src_file = open(src_filepath, "w", encoding="utf-8", errors="ignore")
+            src_file.write(src)
+            src_file.close()
+
+            if thread_recognize and thread_recognize.is_alive(): stop_thread(thread_recognize)
+
+            if recognizing:
+                thread_recognize = Thread(target=worker_recognize, args=(src, show_error_messages), daemon=True)
+                thread_recognize.start()
+
+            if thread_timed_translate and thread_timed_translate.is_alive(): stop_thread(thread_timed_translate)
+
+            if recognizing:
+                thread_timed_translate = Thread(target=worker_timed_translate, args=(src, dst), daemon=True)
+                thread_timed_translate.start()
+
+
+        elif event == '-DST-':
+
+            src = vosk_language.code_of_name[str(main_window['-SRC-'].get())]
+            dst = google_language.code_of_name[str(main_window['-DST-'].get())]
+
+            if values['-USE-BIG-MODEL-']:
+                vosk_language = VoskLanguageBig()
+                vosk_recognizer = VoskRecognizerBig(loglevel=-1, language_code=src, block_size=4096, progress_callback=show_progress)
+            else:
+                vosk_language = VoskLanguage()
+                vosk_recognizer = VoskRecognizer(loglevel=-1, language_code=src, block_size=4096, progress_callback=show_progress)
+
+            model_name = vosk_language.model_of_code[src]
+            main_window['-USED-MODEL-'].update(model_name)
+
+            last_selected_dst = dst
+            dst_file = open(dst_filepath, "w", encoding="utf-8", errors="ignore")
+            dst_file.write(dst)
+            dst_file.close()
+
+            if thread_recognize and thread_recognize.is_alive(): stop_thread(thread_recognize)
+            if recognizing:
+                thread_recognize = Thread(target=worker_recognize, args=(src, show_error_messages), daemon=True)
+                thread_recognize.start()
+
+            if thread_timed_translate and thread_timed_translate.is_alive(): stop_thread(thread_timed_translate)
+            if recognizing:
+                thread_timed_translate = Thread(target=worker_timed_translate, args=(src, dst), daemon=True)
+                thread_timed_translate.start()
+
+
+        elif event == '-USE-BIG-MODEL-':
+
+            src = vosk_language.code_of_name[str(main_window['-SRC-'].get())]
+            dst = google_language.code_of_name[str(main_window['-DST-'].get())]
+
+            if values['-USE-BIG-MODEL-']:
+                vosk_language = VoskLanguageBig()
+                vosk_recognizer = VoskRecognizerBig(loglevel=-1, language_code=src, block_size=4096, progress_callback=show_progress)
+            else:
+                vosk_language = VoskLanguage()
+                vosk_recognizer = VoskRecognizer(loglevel=-1, language_code=src, block_size=4096, progress_callback=show_progress)
+
+            model_name = vosk_language.model_of_code[src]
+            main_window['-USED-MODEL-'].update(model_name)
+
+            if thread_recognize and thread_recognize.is_alive(): stop_thread(thread_recognize)
+            if recognizing:
+                thread_recognize = Thread(target=worker_recognize, args=(src, show_error_messages), daemon=True)
+                thread_recognize.start()
+
+            if thread_timed_translate and thread_timed_translate.is_alive(): stop_thread(thread_timed_translate)
+            if recognizing:
+                thread_timed_translate = Thread(target=worker_timed_translate, args=(src, dst), daemon=True)
+                thread_timed_translate.start()
+
+
+        #if event == 'right_click':
+        elif event == 'right_click':
 
             x, y = main_window.TKroot.winfo_pointerxy()
             widget = main_window.TKroot.winfo_containing(x, y)
             widget.focus_set()
 
 
-        if event == 'Copy':
+        #if event == 'Copy':
+        elif event == 'Copy':
 
             key = main_window.find_element_with_focus().Key
             widget = main_window[key].Widget
@@ -4267,7 +4927,8 @@ def main():
                     text_elem.Widget.xview_moveto(1.0)
 
 
-        if event == 'Exit' or event == sg.WIN_CLOSED:
+        #if event == 'Exit' or event == sg.WIN_CLOSED:
+        elif event == 'Exit' or event == sg.WIN_CLOSED:
 
             if transcribe_window is not None and window == transcribe_window:
 
@@ -4292,7 +4953,8 @@ def main():
                     recognizing = False
                     not_transcribing = True
 
-                    if main_window['-URL-'].get() != (None or "") and main_window['-RECORD-STREAMING-'].get() == True:
+                    if main_window['-URL-'].get() and main_window['-RECORD-STREAMING-'].get():
+
                         if sys.platform == "win32":
                             stop_record_streaming_windows()
 
@@ -4328,7 +4990,10 @@ def main():
         elif event == '-RECORD-STREAMING-':
 
             if values['-RECORD-STREAMING-']:
+
                 is_valid_url_streaming = is_streaming_url(str(values['-URL-']).strip())
+                #print(f"is_valid_url_streaming = {is_valid_url_streaming}")
+
                 if not is_valid_url_streaming:
                     FONT = ("Helvetica", 10)
                     sg.set_options(font=FONT)
@@ -4342,6 +5007,8 @@ def main():
             #print("recognizing = {}".format(recognizing))
 
             main_window['-START-BUTTON-'].update(('Stop','Start')[not recognizing], button_color=(('white', ('red', '#283b5b')[not recognizing])))
+            src = vosk_language.code_of_name[str(main_window['-SRC-'].get())]
+            dst = google_language.code_of_name[str(main_window['-DST-'].get())]
 
             if recognizing:
                 #print("VOSK Live Subtitle is START LISTENING now")
@@ -4350,6 +5017,16 @@ def main():
                 start_button_click_time = datetime.now()
                 #print("start_button_click_time = {}".format(start_button_click_time))
 
+                if values['-USE-BIG-MODEL-']:
+                    vosk_language = VoskLanguageBig()
+                    vosk_recognizer = VoskRecognizerBig(loglevel=-1, language_code=src, block_size=4096, progress_callback=show_progress)
+                else:
+                    vosk_language = VoskLanguage()
+                    vosk_recognizer = VoskRecognizer(loglevel=-1, language_code=src, block_size=4096, progress_callback=show_progress)
+
+                model_name = vosk_language.model_of_code[vosk_language.code_of_name[str(main_window['-SRC-'].get())]]
+                main_window['-USED-MODEL-'].update(model_name)
+
                 if partial_result_filepath and os.path.isfile(partial_result_filepath): os.remove(partial_result_filepath)
                 if time_value_filepath and os.path.isfile(time_value_filepath): os.remove(time_value_filepath)
                 if tmp_src_subtitle_filepath and os.path.isfile(tmp_src_subtitle_filepath): os.remove(tmp_src_subtitle_filepath)
@@ -4357,7 +5034,8 @@ def main():
                 if tmp_src_txt_transcription_filepath and os.path.isfile(tmp_src_txt_transcription_filepath): os.remove(tmp_src_txt_transcription_filepath)
                 if tmp_dst_txt_transcription_filepath and os.path.isfile(tmp_dst_txt_transcription_filepath): os.remove(tmp_dst_txt_transcription_filepath)
 
-                if main_window['-URL-'].get() != (None or "") and main_window['-RECORD-STREAMING-'].get() == True:
+                #if main_window['-URL-'].get() != (None or "") and main_window['-RECORD-STREAMING-'].get() == True:
+                if main_window['-URL-'].get() and main_window['-RECORD-STREAMING-'].get():
 
                     if is_valid_url_streaming:
 
@@ -4396,21 +5074,23 @@ def main():
                         main_window['-START-BUTTON-'].update(('Stop','Start')[not recognizing], button_color=(('white', ('red', '#283b5b')[not recognizing])))
                         main_window['-RECORD-STREAMING-'].update(False)
 
+
                 regions = []
                 transcriptions = []
 
-                if main_window['-URL-'].get() != (None or "") and main_window['-RECORD-STREAMING-'].get() == True:
+                if main_window['-URL-'].get() and main_window['-RECORD-STREAMING-'].get():
+                #if main_window['-URL-'].get() != (None or "") and main_window['-RECORD-STREAMING-'].get() == True:
                     time.sleep(1)
 
                 tmp_src_txt_transcription_filename = f"record.{src}.txt"
                 tmp_src_txt_transcription_filepath = os.path.join(tempfile.gettempdir(), tmp_src_txt_transcription_filename)
-                tmp_src_txt_transcription_file = open(tmp_src_txt_transcription_filepath, "w")
+                tmp_src_txt_transcription_file = open(tmp_src_txt_transcription_filepath, "w", encoding="utf-8", errors="ignore")
                 tmp_src_txt_transcription_file.write("")
                 tmp_src_txt_transcription_file.close()
 
                 tmp_dst_txt_transcription_filename = f"record.{dst}.txt"
                 tmp_dst_txt_transcription_filepath = os.path.join(tempfile.gettempdir(), tmp_dst_txt_transcription_filename)
-                tmp_dst_txt_transcription_file = open(tmp_src_txt_transcription_filepath, "w")
+                tmp_dst_txt_transcription_file = open(tmp_dst_txt_transcription_filepath, "w", encoding="utf-8", errors="ignore")
                 tmp_dst_txt_transcription_file.write("")
                 tmp_dst_txt_transcription_file.close()
 
@@ -4419,7 +5099,7 @@ def main():
                 main_window['-ML-DST-PARTIAL-RESULTS-'].update("")
                 main_window['-ML-DST-RESULTS-'].update("")
 
-                thread_recognize = Thread(target=worker_recognize, args=(src, dst, show_error_messages), daemon=True)
+                thread_recognize = Thread(target=worker_recognize, args=(src, show_error_messages), daemon=True)
                 thread_recognize.start()
 
                 thread_timed_translate = Thread(target=worker_timed_translate, args=(src, dst), daemon=True)
@@ -4439,7 +5119,7 @@ def main():
                 if thread_timed_translate and thread_timed_translate.is_alive(): stop_thread(thread_timed_translate)
 
                 # IF RECORD STREAMING
-                if main_window['-URL-'].get() != (None or "") and main_window['-RECORD-STREAMING-'].get() == True:
+                if main_window['-URL-'].get() and main_window['-RECORD-STREAMING-'].get():
 
                     if sys.platform == "win32":
                         #print("thread_record_streaming.is_alive() = {}".format(thread_record_streaming.is_alive()))
@@ -4458,10 +5138,29 @@ def main():
                         if os.path.isfile(regions_filepath): os.remove(regions_filepath)
                         if os.path.isfile(transcriptions_filepath): os.remove(transcriptions_filepath)
 
-                        not_transcribing = False
-                        thread_vosk_transcribe = Thread(target=vosk_transcribe, args=(src, dst, tmp_recorded_streaming_filepath, subtitle_format), daemon=True)
-                        thread_vosk_transcribe.start()
-                        all_transcribe_threads.append(thread_vosk_transcribe)
+                        # CHECK IF RECORDED MEDIA CAN BE TRANSCRIBED OR NOT
+                        wav_converter = WavConverter(progress_callback=None, error_messages_callback=None)
+
+                        if wav_converter(tmp_recorded_streaming_filepath) is None or wav_converter(tmp_recorded_streaming_filepath) == (None, None):
+
+                            if thread_record_streaming and thread_record_streaming.is_alive():
+                                if sys.platform == "win32":
+                                    stop_record_streaming_windows()
+
+                                else:
+                                    stop_record_streaming_linux()
+
+                            FONT = ("Helvetica", 10)
+                            sg.set_options(font=FONT)
+                            sg.Popup('Media file duration is to short or the file is corrupted', title="Info", line_width=50)
+                            recognizing = False
+                            main_window['-START-BUTTON-'].update(('Stop','Start')[not recognizing], button_color=(('white', ('red', '#283b5b')[not recognizing])))
+
+                        else:
+                            not_transcribing = False
+                            thread_vosk_transcribe = Thread(target=vosk_transcribe, args=(src, dst, tmp_recorded_streaming_filepath, subtitle_format), daemon=True)
+                            thread_vosk_transcribe.start()
+                            all_transcribe_threads.append(thread_vosk_transcribe)
 
                 # IF NOT RECORD STREAMING
                 else:
@@ -4475,6 +5174,7 @@ def main():
 
                     else:
                         stop_record_streaming_linux()
+
 
                 # SAVING TRANSCRIPTIONS AS FORMATTED SUBTITLE FILE WITH FILENAME DECLARED IN COMMAND LINE ARGUMENTS
                 #if args.subtitle_filename and os.path.isfile(regions_filepath) and os.path.isfile(transcriptions_filepath):
@@ -4503,7 +5203,7 @@ def main():
 
             partial_result_filename = "partial_result"
             partial_result_filepath = os.path.join(tempfile.gettempdir(), partial_result_filename)
-            partial_result_file = open(partial_result_filepath, "w")
+            partial_result_file = open(partial_result_filepath, "w", encoding="utf-8", errors="ignore")
             partial_result_file.write(text)
             partial_result_file.close()
 
@@ -4515,19 +5215,26 @@ def main():
         elif event == '-EVENT-RESULTS-' and recognizing==True:
 
             #sentence_translator = SentenceTranslator(src=src, dst=dst, error_messages_callback=show_error_messages)
+            src = vosk_language.code_of_name[str(main_window['-SRC-'].get())]
+            dst = google_language.code_of_name[str(main_window['-DST-'].get())]
             sentence_translator = SentenceTranslator(src=src, dst=dst, endpoint_config=endpoint_config, error_messages_callback=show_error_messages)
+            #line = str(values[event]).strip().lower()
+            #main_window['-ML-SRC-RESULTS-'].update(line + "\n", background_color_for_value='yellow1', append=True, autoscroll=True)
+            #translated_line = sentence_translator(line)
             line = str(values[event]).strip().lower()
             main_window['-ML-SRC-RESULTS-'].update(line + "\n", background_color_for_value='yellow1', append=True, autoscroll=True)
             translated_line = sentence_translator(line)
-            main_window['-ML-DST-RESULTS-'].update(translated_line + "\n", background_color_for_value='yellow1', append=True, autoscroll=True)
+            if translated_line is not None:
+                main_window['-ML-DST-RESULTS-'].update(translated_line + "\n", background_color_for_value='yellow1', append=True, autoscroll=True)
 
-            if overlay_translation_window:
-                overlay_translation_window.UnHide
-                overlay_translation_window['-ML-OVERLAY-DST-PARTIAL-RESULTS-'].update(translated_line, background_color_for_value='black', visible=True, autoscroll=True)
+                if overlay_translation_window:
+                    overlay_translation_window.UnHide()
+                    overlay_translation_window['-ML-OVERLAY-DST-PARTIAL-RESULTS-'].update(translated_line, background_color_for_value='black', visible=True, autoscroll=True)
+                else:
+                    overlay_translation_window = make_overlay_translation_window(100*' ')
+                    overlay_translation_window['-ML-OVERLAY-DST-PARTIAL-RESULTS-'].update(translated_line, background_color_for_value='black', visible=True, autoscroll=True)
             else:
-                overlay_translation_window = make_overlay_translation_window(100*' ')
-                overlay_translation_window['-ML-OVERLAY-DST-PARTIAL-RESULTS-'].update(translated_line, background_color_for_value='black', visible=True, autoscroll=True)
-
+                main_window['-ML-DST-RESULTS-'].update("[Server Error]\n", background_color_for_value='red', append=True, autoscroll=True)
 
         elif event == '-EVENT-VOICE-TRANSLATED-' and recognizing==True:
 
@@ -4691,7 +5398,8 @@ def main():
                 time.sleep(1)
 
 
-        if event == '-CANCEL-' or event == sg.WIN_CLOSED:
+        #if event == '-CANCEL-' or event == sg.WIN_CLOSED:
+        elif event == '-CANCEL-' or event == sg.WIN_CLOSED:
             if window == transcribe_window and transcribe_window is not None:
                 if not not_transcribing:
                     main_window.minimize()
@@ -4700,6 +5408,7 @@ def main():
                     if 'Yes' in answer:
                         not_transcribing = True
                         if thread_vosk_transcribe and thread_vosk_transcribe.is_alive(): stop_thread(thread_vosk_transcribe)
+                        if thread_timed_translate and thread_timed_translate.is_alive(): stop_thread(thread_timed_translate)
                         transcribe_window.close()
                         main_window.Normal()
                     else:
@@ -4707,6 +5416,7 @@ def main():
                         transcribe_window.Normal()
                 else:
                     if thread_vosk_transcribe and thread_vosk_transcribe.is_alive(): stop_thread(thread_vosk_transcribe)
+                    if thread_timed_translate and thread_timed_translate.is_alive(): stop_thread(thread_timed_translate)
                     transcribe_window.close()
                     main_window.Normal()
 
@@ -4763,8 +5473,8 @@ def main():
 
                         else:
 
-                            saved_src_subtitle_file = open(saved_src_subtitle_filename, "w")
-                            tmp_src_txt_transcription_file = open(tmp_src_txt_transcription_filepath, "r")
+                            saved_src_subtitle_file = open(saved_src_subtitle_filename, "w", encoding="utf-8", errors="ignore")
+                            tmp_src_txt_transcription_file = open(tmp_src_txt_transcription_filepath, "r", encoding="utf-8", errors="ignore")
                             for line in tmp_src_txt_transcription_file:
                                 if line:
                                     saved_src_subtitle_file.write(line)
@@ -4797,8 +5507,8 @@ def main():
                             translation_writer.write(saved_dst_subtitle_filename)
 
                         else:
-                            saved_dst_subtitle_file = open(saved_dst_subtitle_filename, "w")
-                            tmp_dst_txt_transcription_file = open(tmp_dst_txt_transcription_filepath, "r")
+                            saved_dst_subtitle_file = open(saved_dst_subtitle_filename, "w", encoding="utf-8", errors="ignore")
+                            tmp_dst_txt_transcription_file = open(tmp_dst_txt_transcription_filepath, "r", encoding="utf-8", errors="ignore")
                             for line in tmp_dst_txt_transcription_file:
                                 if line:
                                     saved_dst_subtitle_file.write(line)
