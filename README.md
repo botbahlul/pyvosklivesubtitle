@@ -41,7 +41,35 @@ pyinstaller --onefile pyvls.py
 ```
 The executable compiled file will be placed by pyinstaller into dist subfolder of your current working folder, then you can just put that compiled exe file into a folder that has been added to your PATH ENVIRONTMENT so you can execute it from anywhere.
 
-NOTES :
+UPDATE NOTES :
+
+Please don't be confused with those android-aarch64 or linux-armv7l etc
+
+They are just same pyvls.pyw scripts setup with different libvosk.so to run on [TERMUX](https://github.com/termux/termux-app/releases)
+
+Those android-aarch64, android-armeabi-v7a, android-x86, and android-x86_64 are pure termux environment (which is running bionic like /system/bin/linker64)
+
+And those linux-aarch64 and linux-armv7l are proot-distro environment installed inside termux (which is running linux glibc like /lib/ld-linux-aarch64.so.1)
+
+If you didn't know yet, we can run a full xfce4 desktop environment on termux with the help of [termux-x11](https://github.com/termux/termux-x11/releases)
+
+```
+pkg update && pkg upgrade -y
+termux-setup-storage
+pkg install x11-repo -y
+pkg install termux-x11-nightly xfce4 xfce4-terminal dbus-x11 pulseaudio pavucontrol termux-api -y
+pulseaudio --start --exit-idle-time=-1 --load="module-native-protocol-tcp auth-anonymous=1"
+termux-x11 :1 -xstartup "dbus-launch --exit-with-session xfce4-session" -dpi 120 &
+```
+
+Don't forget to install [termux-api](https://github.com/termux/termux-api/releases) and give it microphone permission so vosk recognizer can listen to your audio output
+
+You have to install both the apk file and that termux packages
+
+```
+pkg update
+pkg install termux-api -y
+```
 
 START FROM VERSION 0.1.2 THIS APP USE streamlink MODULE WHICH SUPPORTS urllib3 >= 1.26, < 3.x BRANCH, SO IF YOU'RE STILL WANT TO INSTALL THIS APP TRY TO REINSTALL streamlink WITH --force-reinstall ARGUMENT.
 
