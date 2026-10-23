@@ -142,11 +142,12 @@ If Autorun is not present, you can add a New String
 ### Usage
 
 ```
-usage: pyvosklivesubtitle [-h] [-S SRC_LANGUAGE] [-D DST_LANGUAGE] [-lls] [-lld] [-sf SUBTITLE_FILENAME] [-F SUBTITLE_FORMAT] [-lsf]
-                          [-ld] [-af AUDIO_FILENAME] [-d DEVICE] [-r SAMPLERATE] [-u URL] [-vf VIDEO_FILENAME] [-v]
+usage: pyvosklivesubtitle [-h] [-B] [-S SRC_LANGUAGE] [-D DST_LANGUAGE] [-lls] [-lld] [-sf SUBTITLE_FILENAME] [-F SUBTITLE_FORMAT]
+                          [-lsf] [-ld] [-af AUDIO_FILENAME] [-d DEVICE] [-r SAMPLERATE] [-u URL] [-vf VIDEO_FILENAME] [-v]
 
 options:
   -h, --help            show this help message and exit
+  -B, --big-models      Use big models if exist
   -S SRC_LANGUAGE, --src-language SRC_LANGUAGE
                         Spoken language
   -D DST_LANGUAGE, --dst-language DST_LANGUAGE
