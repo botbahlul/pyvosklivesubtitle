@@ -36,7 +36,7 @@ import math
 import traceback
 
 
-VERSION = '0.2.4'
+VERSION = '0.2.5'
 
 
 #============================================================== VOSK PART ==============================================================#
@@ -91,12 +91,58 @@ MODEL_DIRS = _build_model_dirs()
 #print(f"MODEL_DIRS : '{MODEL_DIRS}'")
 
 
+#def _is_termux():
+#    return (
+#        os.path.isdir("/data/data/com.termux")
+#        or "com.termux" in os.environ.get("PREFIX", "")
+#        or "ANDROID_ROOT" in os.environ
+#    )
+
+def _get_elf_interpreter(filename):
+    """Return ELF PT_INTERP path of an executable, or '' if unavailable."""
+    import struct
+    try:
+        with open(filename, "rb") as f:
+            data = f.read()
+        if data[:4] != b"\x7fELF":
+            return ""
+
+        is64 = data[4] == 2
+        bo = "<" if data[5] == 1 else ">"
+
+        if is64:
+            phoff = struct.unpack_from(bo + "Q", data, 32)[0]
+            phentsize, phnum = struct.unpack_from(bo + "HH", data, 54)
+        else:
+            phoff = struct.unpack_from(bo + "I", data, 28)[0]
+            phentsize, phnum = struct.unpack_from(bo + "HH", data, 42)
+
+        for i in range(phnum):
+            off = phoff + i * phentsize
+            if off + phentsize > len(data):
+                break
+            if struct.unpack_from(bo + "I", data, off)[0] != 3:  # PT_INTERP
+                continue
+            if is64:
+                p_offset = struct.unpack_from(bo + "Q", data, off + 8)[0]
+                p_filesz = struct.unpack_from(bo + "Q", data, off + 32)[0]
+            else:
+                p_offset = struct.unpack_from(bo + "I", data, off + 4)[0]
+                p_filesz = struct.unpack_from(bo + "I", data, off + 16)[0]
+            return data[p_offset:p_offset + p_filesz].rstrip(b"\0").decode("utf-8", "replace")
+    except Exception:
+        pass
+    return ""
+
+
 def _is_termux():
-    return (
-        os.path.isdir("/data/data/com.termux")
-        or "com.termux" in os.environ.get("PREFIX", "")
-        or "ANDROID_ROOT" in os.environ
-    )
+    """
+    True only for native Android/Bionic Python (Termux).
+    proot-distro Python uses the glibc loader, so it is Linux even though
+    /data/data/com.termux and ANDROID_ROOT may be visible inside proot.
+    """
+    interp = _get_elf_interpreter(os.path.realpath(sys.executable))
+    return interp in ("/system/bin/linker", "/system/bin/linker64")
 
 
 def libvoskdir():
@@ -2275,15 +2321,15 @@ class SentenceTranslator(object):
 def test_translation_endpoint(src, dst, error_messages_callback=None):
 
     """
-    Menguji kedua endpoint Google Translate.
+    Testing both endpoint of Google Translate
 
     Return:
 
         dictionary endpoint aktif
 
-        atau None jika kedua endpoint gagal.
+        or None if both endpoint fail
 
-    Struktur:
+    Structure:
 
         {
             "type": 1 atau 2,
@@ -2379,8 +2425,8 @@ def test_translation_endpoint(src, dst, error_messages_callback=None):
         #print("SentenceTranslator endpoint 1 : FAILED " "(HTTP %s)" % response.status_code)
 
     except Exception as e:
-            if self.error_messages_callback:
-                self.error_messages_callback(e)
+            if error_messages_callback:
+                error_messages_callback(e)
             else:
                 print(e)
 
@@ -2470,8 +2516,8 @@ def test_translation_endpoint(src, dst, error_messages_callback=None):
         #print("SentenceTranslator endpoint 2 : FAILED " "(HTTP %s)" % response.status_code)
 
     except Exception as e:
-            if self.error_messages_callback:
-                self.error_messages_callback(e)
+            if error_messages_callback:
+                error_messages_callback(e)
             else:
                 print(e)
 
@@ -2500,8 +2546,8 @@ class SubtitleFormatter:
             elif self.format_type == 'raw':
                 return self.raw_formatter(subtitles)
             else:
-                if error_messages_callback:
-                    error_messages_callback(f'Unsupported format type: {self.format_type}')
+                if self.error_messages_callback:
+                    self.error_messages_callback(f'Unsupported format type: {self.format_type}')
                 else:
                     raise ValueError(f'Unsupported format type: {self.format_type}')
 
@@ -4616,10 +4662,11 @@ def main():
     vosk_cache_dir = None
     if sys.platform == "win32":
         vosk_cache_dir = os.path.expanduser('~\\') + '.cache' + '\\' + 'vosk'
-    elif sys.platform == "linux":
-        vosk_cache_dir = os.path.expanduser('~/.cache/vosk')
     elif sys.platform == "darwin":
         vosk_cache_dir = os.path.expanduser('~/Library/Caches/vosk')
+    else:
+        # linux, android (Termux), and other Unix
+        vosk_cache_dir = os.path.expanduser('~/.cache/vosk')
 
     vosk_model_dir = vosk_cache_dir + os.sep + vosk_language.model_of_code[src]
 
