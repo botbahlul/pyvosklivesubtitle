@@ -9,6 +9,14 @@ The speech recognition part is using vosk python module https://pypi.org/project
 pip install --upgrade vosk
 ```
 
+UPDATE NOTES : Don't be confused by those android-aarch64 or linux-armv7l etc
+
+For android-aarch64, android-android-armeabi-v7a, android-x86, and android-x86_64,  they are simply pyvosklivesubtitle scripts that can be run on TERMUX
+
+And those linux-aarch64 and linux-armv7l are pyvosklivesubtitle script that can be run on proot-distro you installed on TERMUX (pkg install proot-distro)
+
+If you don't know yet, we can install linux xfce4 desktop on Termux and run a full desktop GUI of xfce4 with the help of termux-x11, so we can play around with these scripts on that platform
+
 On the older versions (bellow 0.0.11) the translation part is using googletrans=4.0.04c1 and pygoogletranslation module https://github.com/Saravananslb/py-googletranslation, but since version 0.0.11 I decide to use my own simple translate function.
 
 The GUI part is using pysimplegui https://github.com/PySimpleGUI/PySimpleGUI
