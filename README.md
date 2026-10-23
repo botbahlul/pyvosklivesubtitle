@@ -13,7 +13,7 @@ UPDATE NOTES : Don't be confused by those android-aarch64 or linux-armv7l etc
 
 For android-aarch64, android-android-armeabi-v7a, android-x86, and android-x86_64,  they are simply pyvosklivesubtitle scripts that can be run on [TERMUX](https://github.com/termux/termux-app/releases)
 
-And those linux-aarch64 and linux-armv7l are pyvosklivesubtitle scriptS that can be run on proot-distro (ubuntu or debian, you choose) you installed on TERMUX with pkg install proot-distro
+And those linux-aarch64 and linux-armv7l are pyvosklivesubtitle scripts that can be run on proot-distro (ubuntu or debian, you choose) you installed on TERMUX with pkg install proot-distro
 
 ```
 pkg update && pkg upgrade -y
