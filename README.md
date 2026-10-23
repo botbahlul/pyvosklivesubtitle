@@ -1,6 +1,6 @@
 # pyvosklivesubtitle <a href="https://pypi.org/project/pyvosklivesubtitle/"><img src="https://img.shields.io/pypi/v/pyvosklivesubtitle.svg"></img></a>
 
-### PySimpleGUI based DESKTOP APP that can RECOGNIZE any LIVE STREAMING in 23 languages that supported by VOSK then TRANSLATE (using unofficial online Google Translate API) and display it as LIVE CAPTION / LIVE SUBTITLE
+### PySimpleGUI based DESKTOP APP that can RECOGNIZE any LIVE STREAMING in 23 languages that supported by [VOSK](https://github.com/alphacep/vosk-api) then TRANSLATE (using unofficial online Google Translate API) and display it as LIVE CAPTION / LIVE SUBTITLE
 
 https://github.com/botbahlul/pyvosklivesubtitle/assets/88623122/d7f4b9ab-d333-475a-a0d6-c70b3f9b8621
 
@@ -19,9 +19,9 @@ If you don't know yet, we can install linux xfce4 desktop on Termux and run a fu
 
 Don't forget to install [termux-API](https://github.com/termux/termux-api/releases) and give it microphone permission to make sure vosk recognizer can listen to your device's audio!
 
-On the older versions (bellow 0.0.11) the translation part is using googletrans=4.0.04c1 and pygoogletranslation module https://github.com/Saravananslb/py-googletranslation, but since version 0.0.11 I decide to use my own simple translate function.
+On the older versions (bellow 0.0.11) the translation part is using googletrans=4.0.04c1 and [pygoogletranslation](https://github.com/Saravananslb/py-googletranslation) module , but since version 0.0.11 I decide to use my own simple translate function.
 
-The GUI part is using pysimplegui https://github.com/PySimpleGUI/PySimpleGUI
+The GUI part is using [PySimpleGUI](https://github.com/PySimpleGUI/PySimpleGUI)
 ```
 pip install --upgrade pysimplegui
 ```
