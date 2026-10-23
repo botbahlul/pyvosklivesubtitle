@@ -120,7 +120,7 @@ On linux you willl need PAVUCONTROL (by choosing MONITOR of your audio device as
 ![image](https://user-images.githubusercontent.com/88623122/230965838-40764e2a-8ce9-4a03-9f8b-901c9eae43ef.png)
 
 
-On macOS you will need blackhole : https://github.com/existentialaudio/blackhole
+On macOS you will need [blackhole](https://github.com/existentialaudio/blackhole)
 
 
 To DRAG/MOVE that TRANSLATION TEXT anywhere on the screen, just USE CONTROL KEY + LEFT MOUSE combination.
