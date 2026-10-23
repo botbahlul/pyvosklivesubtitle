@@ -35,6 +35,11 @@ termux-x11 :1 -xstartup "dbus-launch --exit-with-session xfce4-session" -dpi 120
 
 Don't forget to install [termux-API](https://github.com/termux/termux-api/releases) and give it microphone permission to make sure vosk recognizer can listen to your device's audio!
 
+```
+pkg update
+pkg install termux-api -y
+```
+
 On the older versions (bellow 0.0.11) the translation part is using googletrans=4.0.04c1 and [pygoogletranslation](https://github.com/Saravananslb/py-googletranslation) module , but since version 0.0.11 I decide to use my own simple translate function.
 
 The GUI part is using [PySimpleGUI](https://github.com/PySimpleGUI/PySimpleGUI)
