@@ -9,37 +9,6 @@ The speech recognition part is using vosk python module https://pypi.org/project
 pip install --upgrade vosk
 ```
 
-UPDATE NOTES : Don't be confused by those android-aarch64 or linux-armv7l etc
-
-For android-aarch64, android-android-armeabi-v7a, android-x86, and android-x86_64,  they are simply pyvosklivesubtitle scripts that can be run on [TERMUX](https://github.com/termux/termux-app/releases)
-
-And those linux-aarch64 and linux-armv7l are pyvosklivesubtitle scripts that can be run on proot-distro (ubuntu or debian, you choose) you installed on TERMUX with pkg install proot-distro
-
-```
-pkg update && pkg upgrade -y
-termux-setup-storage
-pkg install proot-distro -y
-proot-distro install ubuntu
-proot-distro login ubuntu
-```
-
-If you don't know yet, we can install linux xfce4 desktop on Termux and run a full desktop GUI of xfce4 with the help of [termux-x11](https://github.com/termux/termux-x11/releases), so we can play around with these scripts on that platform
-
-```
-pkg update
-pkg install x11-repo -y
-pkg install termux-x11-nightly xfce4 xfce4-terminal dbus-x11 pulseaudio pavucontrol -y
-pulseaudio --start --exit-idle-time=-1 --load="module-native-protocol-tcp auth-anonymous=1"
-termux-x11 :1 -xstartup "dbus-launch --exit-with-session xfce4-session" -dpi 120 &  
-```
-
-Don't forget to install [termux-API](https://github.com/termux/termux-api/releases) and give it microphone permission to make sure vosk recognizer can listen to your device's audio!
-
-```
-pkg update
-pkg install termux-api -y
-```
-
 On the older versions (bellow 0.0.11) the translation part is using googletrans=4.0.04c1 and [pygoogletranslation](https://github.com/Saravananslb/py-googletranslation) module , but since version 0.0.11 I decide to use my own simple translate function.
 
 The GUI part is using [PySimpleGUI](https://github.com/PySimpleGUI/PySimpleGUI)
@@ -72,7 +41,38 @@ pyinstaller --onefile pyvls.py
 ```
 The executable compiled file will be placed by pyinstaller into dist subfolder of your current working folder, then you can just put that compiled exe file into a folder that has been added to your PATH ENVIRONTMENT so you can execute it from anywhere.
 
-NOTES :
+UPDATE NOTES :
+
+Don't be confused by those android-aarch64 or linux-armv7l etc
+
+For android-aarch64, android-android-armeabi-v7a, android-x86, and android-x86_64,  they are simply pyvosklivesubtitle scripts that can be run on [TERMUX](https://github.com/termux/termux-app/releases)
+
+And those linux-aarch64 and linux-armv7l are pyvosklivesubtitle scripts that can be run on proot-distro (ubuntu or debian, you choose) you installed on TERMUX with pkg install proot-distro
+
+```
+pkg update && pkg upgrade -y
+termux-setup-storage
+pkg install proot-distro -y
+proot-distro install ubuntu
+proot-distro login ubuntu
+```
+
+If you don't know yet, we can install linux xfce4 desktop on Termux and run a full desktop GUI of xfce4 with the help of [termux-x11](https://github.com/termux/termux-x11/releases), so we can play around with these scripts on that platform
+
+```
+pkg update
+pkg install x11-repo -y
+pkg install termux-x11-nightly xfce4 xfce4-terminal dbus-x11 pulseaudio pavucontrol -y
+pulseaudio --start --exit-idle-time=-1 --load="module-native-protocol-tcp auth-anonymous=1"
+termux-x11 :1 -xstartup "dbus-launch --exit-with-session xfce4-session" -dpi 120 &  
+```
+
+Don't forget to install [termux-API](https://github.com/termux/termux-api/releases) and give it microphone permission to make sure vosk recognizer can listen to your device's audio!
+
+```
+pkg update
+pkg install termux-api -y
+```
 
 START FROM VERSION 0.1.2 THIS APP USE streamlink MODULE WHICH SUPPORTS urllib3 >= 1.26, < 3.x BRANCH, SO IF YOU'RE STILL WANT TO INSTALL THIS APP TRY TO REINSTALL streamlink WITH --force-reinstall ARGUMENT.
 
