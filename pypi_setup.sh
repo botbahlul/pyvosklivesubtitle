@@ -35,23 +35,64 @@
 set -e
 
 
-# ======================================================================
+# ----------------------------------------------------------------------
 # Find Python
-# ======================================================================
+# ----------------------------------------------------------------------
+# Return success if the given command exists and is Python >= 3.10
+python_ok() {
+    command -v "$1" >/dev/null 2>&1 || return 1
+    "$1" -c 'import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)' >/dev/null 2>&1
+}
+
+PYTHON_CMD=""
 
 if [ -n "$PYTHON" ]; then
-    PYTHON_CMD="$PYTHON"
-#elif command -v python3.10 >/dev/null 2>&1; then
-#    PYTHON_CMD="python3.10"
-elif command -v python3 >/dev/null 2>&1; then
-    PYTHON_CMD="python3"
-elif command -v python >/dev/null 2>&1; then
-    PYTHON_CMD="python"
+    # 1. Explicit override
+    if python_ok "$PYTHON"; then
+        PYTHON_CMD="$PYTHON"
+    else
+        echo "ERROR: '$PYTHON' was not found or is older than Python 3.10."
+        exit 1
+    fi
+
+elif [ -n "$VIRTUAL_ENV" ]; then
+    # 2. Active virtual environment (venv / virtualenv)
+    for candidate in \
+        "$VIRTUAL_ENV/bin/python" \
+        "$VIRTUAL_ENV/bin/python3" \
+        "$VIRTUAL_ENV/Scripts/python.exe"
+    do
+        if [ -x "$candidate" ]; then
+            if python_ok "$candidate"; then
+                PYTHON_CMD="$candidate"
+                break
+            else
+                echo "ERROR: The active virtual environment ($VIRTUAL_ENV)"
+                echo "       uses Python older than 3.10."
+                exit 1
+            fi
+        fi
+    done
+
+    if [ -z "$PYTHON_CMD" ]; then
+        echo "ERROR: VIRTUAL_ENV is set ($VIRTUAL_ENV) but no Python executable was found in it."
+        exit 1
+    fi
+
 else
-    echo "ERROR: Python 3 was not found."
-    exit 1
+    # 3. System Python, in priority order
+    for candidate in python python3.10 python3; do
+        if python_ok "$candidate"; then
+            PYTHON_CMD="$candidate"
+            break
+        fi
+    done
 fi
 
+if [ -z "$PYTHON_CMD" ]; then
+    echo "ERROR: Python 3.10 or newer was not found."
+    exit 1
+fi
 
 # ======================================================================
 # Check Python version

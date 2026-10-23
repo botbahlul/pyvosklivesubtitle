@@ -748,7 +748,6 @@ long_description = (
 INSTALL_REQUIRES = [
     "pysimplegui>=4.60.1",
     "sounddevice>=0.4.4",
-    "vosk>=0.3.44",
     "requests>=2.27.1",
     "httpx>=0.13.3",
     "streamlink>=5.3.1",

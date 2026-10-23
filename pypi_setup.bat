@@ -1,186 +1,203 @@
 @echo off
+rem ======================================================================
+rem pyvosklivesubtitle PyPI build script (Windows 10/11)
+rem
+rem Builds the source distribution and the Windows wheel.
+rem Linux, Android/Termux and macOS wheels are built with pypi_setup.sh.
+rem
+rem Python selection priority:
+rem   1. %PYTHON%        explicit override, for example: set PYTHON=C:\Python314\python.exe
+rem   2. %VIRTUAL_ENV%   active virtual environment
+rem   3. python / python3 on PATH, then the "py -3" launcher
+rem
+rem Python 3.10 or newer is required.
+rem ======================================================================
+
 setlocal EnableExtensions
 
-set "Py_DEBUG=1"
+rem Always work from the folder that contains this script
+cd /d "%~dp0"
 
-echo ==============================================
-echo  pyvosklivesubtitle PyPI build
-echo  Platform : Windows
-echo ==============================================
+rem ----------------------------------------------------------------------
+rem Find Python
+rem ----------------------------------------------------------------------
+set "PYTHON_CMD="
+set "PY_EXE="
+
+if defined PYTHON goto :use_override
+if defined VIRTUAL_ENV goto :use_venv
+goto :use_system
+
+:use_override
+call :python_ok "%PYTHON%"
+if errorlevel 1 goto :err_override
+set "PYTHON_CMD=%PYTHON%"
+goto :python_found
+
+:err_override
 echo.
+echo ERROR: "%PYTHON%" was not found or is older than Python 3.10.
+goto :fail
 
+:use_venv
+set "VENV_PY=%VIRTUAL_ENV%\Scripts\python.exe"
+if not exist "%VENV_PY%" goto :err_venv_missing
+call :python_ok "%VENV_PY%"
+if errorlevel 1 goto :err_venv_old
+set "PYTHON_CMD=%VENV_PY%"
+goto :python_found
 
-REM ============================================================
-REM Python detection
-REM ============================================================
+:err_venv_missing
+echo.
+echo ERROR: VIRTUAL_ENV is set but no python.exe was found in:
+echo        %VIRTUAL_ENV%\Scripts
+goto :fail
 
+:err_venv_old
+echo.
+echo ERROR: The active virtual environment uses Python older than 3.10:
+echo        %VIRTUAL_ENV%
+goto :fail
+
+:use_system
+for %%C in (python python3) do (
+    if not defined PYTHON_CMD (
+        call :python_ok "%%C"
+        if not errorlevel 1 set "PYTHON_CMD=%%C"
+    )
+)
+if defined PYTHON_CMD goto :python_found
+
+rem Fall back to the Windows "py" launcher
 where py >nul 2>&1
-if not errorlevel 1 (
-    set "PYTHON=py -3.10"
-    goto :python_found
-)
+if errorlevel 1 goto :err_no_python
+for /f "usebackq delims=" %%P in (`py -3 -c "import sys; print(sys.executable)" 2^>nul`) do set "PY_EXE=%%P"
+if not defined PY_EXE goto :err_no_python
+call :python_ok "%PY_EXE%"
+if errorlevel 1 goto :err_no_python
+set "PYTHON_CMD=%PY_EXE%"
+goto :python_found
 
-where python3.10 >nul 2>&1
-if not errorlevel 1 (
-    set "PYTHON=python3.10"
-    goto :python_found
-)
-
-where python >nul 2>&1
-if not errorlevel 1 (
-    set "PYTHON=python"
-    goto :python_found
-)
-
-echo ERROR: Python 3.10+ was not found.
+:err_no_python
 echo.
-exit /b 1
-
+echo ERROR: Python 3.10 or newer was not found.
+goto :fail
 
 :python_found
 
-echo Python   : %PYTHON%
 echo.
+echo Using Python:
+"%PYTHON_CMD%" --version
+if errorlevel 1 goto :fail
 
-
-REM ============================================================
-REM Check Python version
-REM ============================================================
-
-%PYTHON% -c "import sys; sys.exit(0 if sys.version_info >= (3,10) else 1)"
-
-if errorlevel 1 (
-    echo ERROR: Python 3.10 or newer is required.
-    echo.
-    exit /b 1
-)
-
-
-REM ============================================================
-REM Clean previous build
-REM ============================================================
-
-echo [1/5] Cleaning old build files...
+rem ----------------------------------------------------------------------
+rem Python runtime detection
+rem ----------------------------------------------------------------------
 echo.
+echo ========================
+echo Python runtime detection
+echo ========================
+"%PYTHON_CMD%" -c "import os, platform, sys; print('Operating system : ' + platform.system()); print('Architecture     : ' + platform.machine()); print('Python executable: ' + os.path.realpath(sys.executable)); sys.exit(0 if platform.system() == 'Windows' else 1)"
+if errorlevel 1 goto :err_not_windows
+goto :platform_ok
 
-if exist ".\build" (
-    rmdir /s /q ".\build"
-    if errorlevel 1 (
-        echo ERROR: Failed to delete .\build
-        exit /b 1
-    )
-)
-
-if exist ".\dist" (
-    rmdir /s /q ".\dist"
-    if errorlevel 1 (
-        echo ERROR: Failed to delete .\dist
-        exit /b 1
-    )
-)
-
-if exist ".\pyvosklivesubtitle.egg-info" (
-    rmdir /s /q ".\pyvosklivesubtitle.egg-info"
-    if errorlevel 1 (
-        echo ERROR: Failed to delete .\pyvosklivesubtitle.egg-info
-        exit /b 1
-    )
-)
-
-if exist ".\vosk_autosrt.egg-info" (
-    rmdir /s /q ".\vosk_autosrt.egg-info"
-    if errorlevel 1 (
-        echo ERROR: Failed to delete .\vosk_autosrt.egg-info
-        exit /b 1
-    )
-)
-
-
-REM ============================================================
-REM Update build tools
-REM ============================================================
-
+:err_not_windows
 echo.
-echo [2/5] Updating build tools...
+echo ERROR: This script builds the Windows wheel and must run on Windows.
+echo        Use pypi_setup.sh on Linux, Termux and macOS.
+goto :fail
+
+:platform_ok
+
+rem ----------------------------------------------------------------------
+rem Clean previous build
+rem ----------------------------------------------------------------------
 echo.
+echo Cleaning previous build files...
+if exist build rmdir /s /q build
+if exist dist rmdir /s /q dist
+for /d %%D in (*.egg-info) do rmdir /s /q "%%D"
 
-%PYTHON% -m pip install --upgrade pip setuptools wheel build
-
-if errorlevel 1 (
-    echo.
-    echo ERROR: Failed to update build tools.
-    exit /b 1
-)
-
-
-REM ============================================================
-REM Build source distribution
-REM ============================================================
-
+rem ----------------------------------------------------------------------
+rem Build tools
+rem ----------------------------------------------------------------------
 echo.
-echo [3/5] Building source distribution...
+echo Updating setuptools and wheel...
+"%PYTHON_CMD%" -m pip install --upgrade setuptools wheel
+if errorlevel 1 goto :fail
+
+rem ----------------------------------------------------------------------
+rem Build source distribution
+rem setup.py deliberately includes ALL native libraries for sdist.
+rem ----------------------------------------------------------------------
 echo.
+echo Building source distribution...
+"%PYTHON_CMD%" setup.py sdist
+if errorlevel 1 goto :fail
 
-%PYTHON% -m build --sdist
-
-if errorlevel 1 (
-    echo.
-    echo ERROR: Failed to build source distribution.
-    exit /b 1
-)
-
-
-REM ============================================================
-REM Build Windows wheel
-REM
-REM Do NOT use manylinux here.
-REM Windows wheels are automatically tagged win_amd64
-REM when using 64-bit Python.
-REM ============================================================
-
+rem ----------------------------------------------------------------------
+rem Build Windows wheel
+rem ----------------------------------------------------------------------
 echo.
-echo [4/5] Building Windows wheel...
+echo Detected Windows.
+echo Building Windows wheel...
+"%PYTHON_CMD%" setup.py bdist_wheel
+if errorlevel 1 goto :fail
+
+rem ----------------------------------------------------------------------
+rem Verify wheel contents:
+rem   - must contain libvosk.dll
+rem   - must NOT contain Linux, Android or macOS Vosk libraries
+rem ----------------------------------------------------------------------
 echo.
+echo Checking Windows wheel contents...
+"%PYTHON_CMD%" -c "import glob,sys,zipfile; w=sorted(glob.glob('dist/*.whl')); sys.exit('ERROR: No wheel was created.') if not w else None; n=zipfile.ZipFile(w[0]).namelist(); sys.exit('ERROR: Windows wheel does not contain libvosk.dll') if not any(x.endswith('libvosk.dll') for x in n) else None; bad=[x for x in n if 'libvosk_linux_' in x or 'libvosk_android-' in x or x.endswith('libvosk.so') or x.endswith('libvosk.dyld')]; sys.exit('ERROR: Non-Windows Vosk library detected inside Windows wheel: ' + ', '.join(bad)) if bad else None; print('Wheel OK: ' + w[0])"
+if errorlevel 1 goto :fail
 
-%PYTHON% -m build --wheel
-
-if errorlevel 1 (
-    echo.
-    echo ERROR: Failed to build Windows wheel.
-    exit /b 1
-)
-
-
-REM ============================================================
-REM Verify output
-REM ============================================================
-
+rem ----------------------------------------------------------------------
+rem Show resulting distributions
+rem ----------------------------------------------------------------------
 echo.
-echo [5/5] Build completed.
-echo.
+echo =======================
+echo Generated distributions
+echo =======================
+dir dist
 
-if not exist ".\dist" (
-    echo ERROR: dist directory was not created.
-    exit /b 1
-)
+rem ----------------------------------------------------------------------
+rem Verify distributions with twine
+rem ----------------------------------------------------------------------
+echo.
+echo Checking distributions with twine...
+"%PYTHON_CMD%" -m twine --version >nul 2>&1
+if errorlevel 1 goto :no_twine
+"%PYTHON_CMD%" -m twine check dist/*
+if errorlevel 1 goto :fail
+goto :success
 
-echo ==============================================
-echo  Generated packages:
-echo ==============================================
-echo.
+:no_twine
+echo WARNING: twine is not installed.
+echo Install it with:
+echo     pip install twine
 
-dir /b ".\dist"
-
+:success
 echo.
-echo ==============================================
-echo  Expected Windows wheel:
-echo ==============================================
-echo.
-echo  pyvosklivesubtitle-X.Y.Z-cp310-cp310-win_amd64.whl
-echo.
-echo Upload the files from .\dist\
-echo ==============================================
-echo.
-
+echo ================
+echo BUILD SUCCESSFUL
+echo ================
 endlocal
 exit /b 0
+
+:fail
+echo.
+echo ================
+echo BUILD FAILED
+echo ================
+endlocal
+exit /b 1
+
+rem ----------------------------------------------------------------------
+rem Subroutine: succeed if the given command exists and is Python >= 3.10
+rem ----------------------------------------------------------------------
+:python_ok
+"%~1" -c "import sys; sys.exit(0 if sys.version_info >= (3, 10) else 1)" >nul 2>&1
+exit /b %errorlevel%
