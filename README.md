@@ -13,9 +13,25 @@ UPDATE NOTES : Don't be confused by those android-aarch64 or linux-armv7l etc
 
 For android-aarch64, android-android-armeabi-v7a, android-x86, and android-x86_64,  they are simply pyvosklivesubtitle scripts that can be run on [TERMUX](https://github.com/termux/termux-app/releases)
 
-And those linux-aarch64 and linux-armv7l are pyvosklivesubtitle script that can be run on proot-distro you installed on TERMUX (pkg install proot-distro)
+And those linux-aarch64 and linux-armv7l are pyvosklivesubtitle scriptS that can be run on proot-distro (ubuntu or debian, you choose) you installed on TERMUX with pkg install proot-distro
+
+```
+pkg update && pkg upgrade -y
+termux-setup-storage
+pkg install proot-distro -y
+proot-distro install ubuntu
+proot-distro login ubuntu
+```
 
 If you don't know yet, we can install linux xfce4 desktop on Termux and run a full desktop GUI of xfce4 with the help of [termux-x11](https://github.com/termux/termux-x11/releases), so we can play around with these scripts on that platform
+
+```
+pkg update
+pkg install x11-repo -y
+pkg install termux-x11-nightly xfce4 xfce4-terminal dbus-x11 pulseaudio pavucontrol -y
+pulseaudio --start --exit-idle-time=-1 --load="module-native-protocol-tcp auth-anonymous=1"
+termux-x11 :1 -xstartup "dbus-launch --exit-with-session xfce4-session" -dpi 120 &  
+```
 
 Don't forget to install [termux-API](https://github.com/termux/termux-api/releases) and give it microphone permission to make sure vosk recognizer can listen to your device's audio!
 
