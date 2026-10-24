@@ -72,7 +72,7 @@ termux-x11 :1 -xstartup "dbus-launch --exit-with-session xfce4-session" -dpi 120
 
 Don't forget to install [termux-api](https://github.com/termux/termux-api/releases) and give it microphone permission so vosk recognizer can listen to your audio
 
-You have to install both the apk file and that termux packages
+You have to install both the apk file and that termux packages for those termux-11 and termux-api
 
 ```
 pkg update
@@ -86,11 +86,15 @@ pulseaudio --start --exit-idle-time=-1 --load="module-native-protocol-tcp auth-a
 termux-x11 :1 -xstartup "dbus-launch --exit-with-session xfce4-session" -dpi 120 &
 ```
 
-Now open the terminal aplication of xfce4 and then
+Now open the termux-11 app you installed before via the apk file, then open terminal application of xfce4 and then
+
 ```
-python3 -m venv ~/venv
-source ~/venv/activate
-python3 -m pip install --upgrade pyvosklivesubtitle
+proot-distro login ubuntu
+apt update
+apt install python -y
+python -m venv ~/venv
+source ~/venv/bin/activate
+python -m pip install --upgrade pyvosklivesubtitle
 export DISPLAY=:1
 pyvosklivesubtitle
 ```
