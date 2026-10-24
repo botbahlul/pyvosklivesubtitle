@@ -86,7 +86,19 @@ pulseaudio --start --exit-idle-time=-1 --load="module-native-protocol-tcp auth-a
 termux-x11 :1 -xstartup "dbus-launch --exit-with-session xfce4-session" -dpi 120 &
 ```
 
-Now open the termux-11 app you installed before via the apk file, then open terminal application of xfce4 and then
+You can save thsese 2 commands above into a shell script for example can name it xfce4.sh so you can just type xfce4.sh every time you wan to run xfce4
+
+```
+cat << 'EOF' > xfce4.sh
+#! /bin/sh
+pulseaudio --start --exit-idle-time=-1 --load="module-native-protocol-tcp auth-anonymous=1"
+termux-x11 :1 -xstartup "dbus-launch --exit-with-session xfce4-session" -dpi 120 &
+EOF
+chmod +x xfce4.sh
+```
+
+
+Now open the termux-11 app you've installed before via the apk file, then open terminal application of xfce4 and then
 
 ```
 proot-distro login ubuntu
