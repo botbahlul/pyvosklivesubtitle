@@ -65,7 +65,7 @@ If you didn't know yet, we can run a full xfce4 desktop environment on termux wi
 pkg update && pkg upgrade -y
 termux-setup-storage
 pkg install x11-repo -y
-pkg install termux-x11-nightly xfce4 xfce4-terminal dbus-x11 pulseaudio pavucontrol -y
+pkg install termux-x11-nightly xfce4 xfce4-terminal dbus pulseaudio pavucontrol -y
 pulseaudio --start --exit-idle-time=-1 --load="module-native-protocol-tcp auth-anonymous=1"
 termux-x11 :1 -xstartup "dbus-launch --exit-with-session xfce4-session" -dpi 120 &
 ```
