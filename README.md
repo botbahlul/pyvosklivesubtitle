@@ -79,6 +79,23 @@ pkg update
 pkg install termux-api -y
 ```
 
+If you want to try to install and run pyvosklivesubtitle in proot-distro environment in xfce4
+
+```
+pulseaudio --start --exit-idle-time=-1 --load="module-native-protocol-tcp auth-anonymous=1"
+termux-x11 :1 -xstartup "dbus-launch --exit-with-session xfce4-session" -dpi 120 &
+```
+
+Now open the terminal aplication of xfce4 and then
+```
+python3 -m venv ~/venv
+source ~/venv/activate
+python3 -m pip install --upgrade pyvosklivesubtitle
+export DISPLAY=:1
+pyvosklivesubtitle
+```
+
+
 START FROM VERSION 0.1.2 THIS APP USE streamlink MODULE WHICH SUPPORTS urllib3 >= 1.26, < 3.x BRANCH, SO IF YOU'RE STILL WANT TO INSTALL THIS APP TRY TO REINSTALL streamlink WITH --force-reinstall ARGUMENT.
 
 ```
