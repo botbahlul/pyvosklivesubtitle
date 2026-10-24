@@ -51,6 +51,14 @@ Those android-aarch64, android-armeabi-v7a, android-x86, and android-x86_64 are 
 
 And those linux-aarch64 and linux-armv7l are proot-distro environment installed inside termux (which is running linux glibc like /lib/ld-linux-aarch64.so.1)
 
+```
+pkg update && pkg upgrade -y
+termux-setup-storage
+pkg install proot-disto -y
+proot-distro install ubuntu
+proot-distro login ubuntu
+```
+
 If you didn't know yet, we can run a full xfce4 desktop environment on termux with the help of [termux-x11](https://github.com/termux/termux-x11/releases)
 
 ```
