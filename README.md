@@ -157,8 +157,11 @@ LAUNCH Audio Repeater MME, NOT Audio Repeater KS! AND THEN CLICK THAT START BUTT
 
 
 On linux you willl need PAVUCONTROL (by choosing MONITOR of your audio device as INPUT DEVICE)
+
 ![image](https://user-images.githubusercontent.com/88623122/231320153-e89bb21e-916f-4e82-a520-43e3112f6801.png)
 ![image](https://user-images.githubusercontent.com/88623122/230965838-40764e2a-8ce9-4a03-9f8b-901c9eae43ef.png)
+
+Or simply just use that [route_audio.sh](https://github.com/botbahlul/pyvosklivesubtitle/blob/main/route_audio.sh) script
 
 
 On macOS you will need [blackhole](https://github.com/existentialaudio/blackhole)
