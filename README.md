@@ -102,7 +102,7 @@ pip install pyvosklivesubtutle
 pyvosklivesubtutle
 ```
 
-If you want to try pyvosklivesubtitle in proot-distro ubuntu environment, opnen that xfce4-terminal app and type
+If you want to try pyvosklivesubtitle in proot-distro ubuntu environment, open xfce4-terminal app and type
 
 ```
 pkg install proot-disto -y
