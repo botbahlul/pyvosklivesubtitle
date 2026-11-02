@@ -58,7 +58,7 @@ If you didn't know yet, we can run a full xfce4 desktop environment on termux wi
 termux-setup-storage
 pkg update && pkg upgrade -y
 pkg install x11-repo -y
-pkg install termux-x11-nightly xfce4 xfce4-terminal dbus pulseaudio pavucontrol -y
+pkg install termux-x11-nightly termux-api xfce4 xfce4-terminal dbus pulseaudio pavucontrol -y
 pulseaudio --start --exit-idle-time=-1 --load="module-native-protocol-tcp auth-anonymous=1"
 termux-x11 :1 -xstartup "dbus-launch --exit-with-session xfce4-session" -dpi 120 &
 ```
@@ -70,14 +70,9 @@ pkg update
 pkg install python python-pip python-tkinter -y
 ```
 
-And also [termux-api](https://github.com/termux/termux-api/releases), don't forget to give it microphone permission so vosk recognizer can listen to your audio
+And also [termux-api](https://github.com/termux/termux-api/releases) app, don't forget to give it microphone permission so vosk recognizer can listen to your audio
 
 You have to install both the apk file and that termux packages for those termux-11 and termux-api
-
-```
-pkg update
-pkgtermux-api -y
-```
 
 If you want to try to install and run pyvosklivesubtitle in xfce4 you can use these 2 commands
 
@@ -111,13 +106,107 @@ If you want to try pyvosklivesubtitle in proot-distro ubuntu environment, opnen 
 pkg install proot-disto -y
 proot-distro install ubuntu
 proot-distro login ubuntu
-apt update
+apt update && apt upgrade -y
 apt install python python3-pip python3-tk -y
 python -m venv ~/venv
 source ~/venv/bin/activate
 python -m pip install --upgrade pyvosklivesubtitle
 export DISPLAY=:1 # THIS IS MANDATORY TO RUN ANY PROOT-DISTRO UBUNTU GUI APPS IN XFCE4 ENVIRONMENT!
 pyvosklivesubtitle
+```
+
+For audio routing in exfce4 you can use this vmic.sh script :
+
+```
+cat << 'EOF' > vmic.sh
+#!/bin/bash
+
+set -e
+
+command -v pactl >/dev/null 2>&1 || {
+    echo "ERROR: pactl not found, please install pulseaudio-utils package with sudo apt install pulseaudio-utils"
+    exit 1
+}
+
+pactl info >/dev/null || {
+    echo "ERROR: PipeWire/PulseAudio server unavailable"
+    exit 1
+}
+
+echo "Resetting old audio routing if exist..."
+
+DEFAULT_SINK=$(pactl list short sinks | awk '{print $2}')
+
+MODULE_IDS=$(pactl list short modules | awk -v ds="$DEFAULT_SINK" '
+    ($2 == "module-loopback" || $2 == "module-remap-source" || $2 == "module-null-sink") && \
+    ($0 ~ "virtual_sink" || $0 ~ "virtual_mic" || $0 ~ ds) {
+        print $1
+    }
+')
+
+
+if [ -n "$MODULE_IDS" ]; then
+    for id in $MODULE_IDS; do
+        pactl unload-module "$id" 2>/dev/null || true
+    done
+fi
+
+
+DEFAULT_SINK=$(pactl list short sinks | awk '{print $2}')
+DEFAULT_SINK_MONITOR="${DEFAULT_SINK}.monitor"
+VIRTUAL_SINK="virtual_sink"
+VIRTUAL_MIC="virtual_mic"
+
+echo "Creating $VIRTUAL_SINK..."
+
+if ! pactl list short sinks | awk '{print $2}' | grep -Fxq "$VIRTUAL_SINK"; then
+    pactl load-module module-null-sink \
+        sink_name="$VIRTUAL_SINK" \
+        sink_properties=device.description=VirtualSink >/dev/null
+fi
+
+echo "Creating $VIRTUAL_MIC from $DEFAULT_SINK_MONITOR..."
+
+if ! pactl list short sources | awk '{print $2}' | grep -Fxq "$VIRTUAL_MIC"; then
+    pactl load-module module-remap-source \
+        "master=$DEFAULT_SINK_MONITOR" \
+        source_name="$VIRTUAL_MIC" \
+        source_properties=device.description=VirtualMic >/dev/null
+fi
+
+echo "Creating looopback $DEFAULT_SINK_MONITOR to $VIRTUAL_SINK"
+
+LOOPBACK_ID=$(
+    pactl list short modules |
+    awk -v source="$VIRTUAL_MIC" -v sink="$VIRTUAL_SINK" '
+        $2 == "module-loopback" &&
+        index($0, "source=" source) &&
+        index($0, "sink=" sink) {
+            print $1
+            exit
+        }
+    '
+)
+
+if [[ -z "$LOOPBACK_ID" ]]; then
+    pactl load-module module-loopback \
+        "source=$DEFAULT_SINK_MONITOR" \
+        "sink=$VIRTUAL_SINK" >/dev/null
+fi
+
+echo "Set $VIRTUAL_MIC as default source..."
+pactl set-default-source virtual_mic
+
+echo
+echo "Audio routing finished"
+echo "Default playback : $DEFAULT_SINK"
+echo "VirtualSink      : $VIRTUAL_SINK"
+echo "VirtualMic       : $VIRTUAL_MIC"
+echo "Default input    : $VIRTUAL_MIC"
+echo "Loopback         : $DEFAULT_SINK_MONITOR -> $VIRTUAL_SINK"
+EOF
+chmod +x vmic.sh
+./vmic.sh
 ```
 
 START FROM VERSION 0.1.2 THIS APP USE streamlink MODULE WHICH SUPPORTS urllib3 >= 1.26, < 3.x BRANCH, SO IF YOU'RE STILL WANT TO INSTALL THIS APP TRY TO REINSTALL streamlink WITH --force-reinstall ARGUMENT.
