@@ -102,7 +102,7 @@ pip install pyvosklivesubtutle
 pyvosklivesubtutle
 ```
 
-If you want to try pyvosklivesubtitle in proot-distro ubuntu environment, open xfce4-terminal app and type
+If you want to try pyvosklivesubtitle in proot-distro ubuntu environment, open that terminal app and type
 
 ```
 pkg install proot-disto -y
@@ -117,7 +117,7 @@ export DISPLAY=:1 # THIS IS MANDATORY TO RUN ANY PROOT-DISTRO UBUNTU GUI APPS IN
 pyvosklivesubtitle
 ```
 
-For audio routing in exfce4 you can use this vmic.sh script :
+For audio routing in xfce4 you can use this vmic.sh script :
 
 ```
 cat << 'EOF' > vmic.sh
