@@ -63,8 +63,6 @@ termux-setup-storage
 pkg update && pkg upgrade -y
 pkg install x11-repo -y
 pkg install termux-x11-nightly termux-api xfce4 xfce4-terminal dbus pulseaudio pavucontrol -y
-pulseaudio --start --exit-idle-time=-1 --load="module-native-protocol-tcp auth-anonymous=1"
-termux-x11 :1 -xstartup "dbus-launch --exit-with-session xfce4-session" -dpi 120 &
 ```
 
 Don't forget to install python, python-pip and python-tkinter because this app use tkinter which can not be installed with pip (tkinter is part of termux python packages)
@@ -123,7 +121,7 @@ For audio routing in exfce4 you can use this vmic.sh script :
 
 ```
 cat << 'EOF' > vmic.sh
-#!/bin/bash
+#!/data/data/com.termux/files/usr/bin/bash
 
 set -e
 
