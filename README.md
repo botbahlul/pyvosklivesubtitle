@@ -12,6 +12,7 @@ pip install --upgrade vosk
 On the older versions (bellow 0.0.11) the translation part is using googletrans=4.0.04c1 and pygoogletranslation module https://github.com/Saravananslb/py-googletranslation, but since version 0.0.11 I decide to use my own simple translate function.
 
 The GUI part is using pysimplegui https://github.com/PySimpleGUI/PySimpleGUI and tkinter
+
 ```
 pip install --upgrade pysimplegui
 ```
