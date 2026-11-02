@@ -218,7 +218,6 @@ pkg i -y tigervnc xorg-xhost
 xhost +local:
 cat << 'EOF' > vnc-xfce4.sh
 #!/data/data/com.termux/files/usr/bin/bash
-#!/data/data/com.termux/files/usr/bin/bash
 vncserver -kill :1 >/dev/null 2>&1
 rm -rf "$PREFIX/tmp/.X11-unix/X1" "$PREFIX/tmp/.X1-lock" /tmp/.X11-unix/X1 /tmp/.X1-lock 2>/dev/null
 export HOSTNAME=localhost
