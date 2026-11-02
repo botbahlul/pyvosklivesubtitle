@@ -110,9 +110,9 @@ proot-distro install ubuntu
 proot-distro login ubuntu
 apt update && apt upgrade -y
 apt install python python3-pip python3-tk -y
-python -m venv ~/venv
+python3 -m venv ~/venv
 source ~/venv/bin/activate
-python -m pip install --upgrade pyvosklivesubtitle
+python3 -m pip install --upgrade pyvosklivesubtitle
 export DISPLAY=:1 # THIS IS MANDATORY TO RUN ANY PROOT-DISTRO UBUNTU GUI APPS IN XFCE4 ENVIRONMENT!
 pyvosklivesubtitle
 ```
