@@ -229,6 +229,8 @@ chmod +x vnc-xfce4.sh
 ./vnc-xfce4.sh
 ```
 
+After execute that ./vnc-xfce4.sh script you can open bVNC app and setup your VNC settings from there.
+
 
 START FROM VERSION 0.1.2 THIS APP USE streamlink MODULE WHICH SUPPORTS urllib3 >= 1.26, < 3.x BRANCH, SO IF YOU'RE STILL WANT TO INSTALL THIS APP TRY TO REINSTALL streamlink WITH --force-reinstall ARGUMENT.
 
