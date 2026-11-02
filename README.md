@@ -211,7 +211,7 @@ chmod +x vmic.sh
 ./vmic.sh
 ```
 
-If you're using older android like those Phoenix OS variants you can not use termux-11, instead you should use bVNC Free to run xfce4
+If you're using older android like those Phoenix OS variants you can not use termux-11, instead you should use [bVNC Free](https://github.com/runsoftdev/bVnc) to run xfce4
 
 ```
 pkg i -y tigervnc xorg-xhost 
