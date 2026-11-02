@@ -41,6 +41,7 @@ pyinstaller --onefile pyvls.py
 ```
 The executable compiled file will be placed by pyinstaller into dist subfolder of your current working folder, then you can just put that compiled exe file into a folder that has been added to your PATH ENVIRONTMENT so you can execute it from anywhere.
 
+
 UPDATE NOTES :
 
 Please don't be confused with those android-aarch64 or linux-armv7l etc
@@ -50,14 +51,6 @@ They are just same pyvls.pyw scripts setup with different libvosk.so to run on [
 Those android-aarch64, android-armeabi-v7a, android-x86, and android-x86_64 are pure termux environment (which is running bionic like /system/bin/linker64)
 
 And those linux-aarch64 and linux-armv7l are proot-distro environment installed inside termux (which is running linux glibc like /lib/ld-linux-aarch64.so.1)
-
-```
-pkg update && pkg upgrade -y
-termux-setup-storage
-pkg install proot-disto -y
-proot-distro install ubuntu
-proot-distro login ubuntu
-```
 
 If you didn't know yet, we can run a full xfce4 desktop environment on termux with the help of [termux-x11](https://github.com/termux/termux-x11/releases)
 
@@ -70,23 +63,30 @@ pulseaudio --start --exit-idle-time=-1 --load="module-native-protocol-tcp auth-a
 termux-x11 :1 -xstartup "dbus-launch --exit-with-session xfce4-session" -dpi 120 &
 ```
 
-Don't forget to install [termux-api](https://github.com/termux/termux-api/releases) and give it microphone permission so vosk recognizer can listen to your audio
+Don't forget to install python, python-pip and python-tkinter because this app use tkinter which can not be installed with pip (tkinter is part of termux python packages)
+
+```
+pkg update
+pkg install python python-pip python-tkinter -y
+```
+
+And also [termux-api](https://github.com/termux/termux-api/releases), don't forget to give it microphone permission so vosk recognizer can listen to your audio
 
 You have to install both the apk file and that termux packages for those termux-11 and termux-api
 
 ```
 pkg update
-pkg install termux-api -y
+pkgtermux-api -y
 ```
 
-If you want to try to install and run pyvosklivesubtitle in proot-distro environment in xfce4
+If you want to try to install and run pyvosklivesubtitle in xfce4 you can use these 2 commands
 
 ```
 pulseaudio --start --exit-idle-time=-1 --load="module-native-protocol-tcp auth-anonymous=1"
 termux-x11 :1 -xstartup "dbus-launch --exit-with-session xfce4-session" -dpi 120 &
 ```
 
-You can save thsese 2 commands above into a shell script for example can name it xfce4.sh so you can just type xfce4.sh every time you wan to run xfce4
+You can save thsese 2 commands into a shell script for example can name it xfce4.sh so you can just type xfce4.sh every time you wan to run xfce4
 
 ```
 cat << 'EOF' > xfce4.sh
@@ -95,28 +95,37 @@ pulseaudio --start --exit-idle-time=-1 --load="module-native-protocol-tcp auth-a
 termux-x11 :1 -xstartup "dbus-launch --exit-with-session xfce4-session" -dpi 120 &
 EOF
 chmod +x xfce4.sh
+./xfce4.sh
 ```
 
-
-Now open the termux-11 app you've installed before via the apk file, then open terminal application of xfce4 and then
+Now you can open the termux-11 app you've installed before via the apk file, then open terminal application of xfce4 and then
 
 ```
+pip install pyvosklivesubtutle
+pyvosklivesubtutle
+```
+
+If you want to try pyvosklivesubtitle in proot-distro ubuntu environment, opnen that xfce4-terminal app and type
+
+```
+pkg install proot-disto -y
+proot-distro install ubuntu
 proot-distro login ubuntu
 apt update
-apt install python -y
+apt install python python3-pip python3-tk -y
 python -m venv ~/venv
 source ~/venv/bin/activate
 python -m pip install --upgrade pyvosklivesubtitle
-export DISPLAY=:1
+export DISPLAY=:1 # THIS IS MANDATORY TO RUN ANY PROOT-DISTRO UBUNTU GUI APPS IN XFCE4 ENVIRONMENT!
 pyvosklivesubtitle
 ```
-
 
 START FROM VERSION 0.1.2 THIS APP USE streamlink MODULE WHICH SUPPORTS urllib3 >= 1.26, < 3.x BRANCH, SO IF YOU'RE STILL WANT TO INSTALL THIS APP TRY TO REINSTALL streamlink WITH --force-reinstall ARGUMENT.
 
 ```
 pip install streamlink --force-reinstall
 ```
+
 
 START FROM VERSION 0.1.2 YOU SHOULD USE THAT "mypyinstaller.bat" (or "mypyinstaller.sh" IF YOU'RE ON LINUX) TO COMPILE WITH pyinstaller.
 
