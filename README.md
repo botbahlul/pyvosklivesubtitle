@@ -39,7 +39,10 @@ You can try to compile that script in win folder (if your OS is Windows) or linu
 pip install pyinstaller
 pyinstaller --onefile pyvls.py
 ```
+
 The executable compiled file will be placed by pyinstaller into dist subfolder of your current working folder, then you can just put that compiled exe file into a folder that has been added to your PATH ENVIRONTMENT so you can execute it from anywhere.
+
+PLEASE NOTE THAT START FROM VERSION 0.1.2 YOU SHOULD USE THAT "mypyinstaller.bat" (or "mypyinstaller.sh" IF YOU'RE ON LINUX) TO COMPILE WITH pyinstaller.
 
 
 UPDATE NOTES :
@@ -214,9 +217,6 @@ START FROM VERSION 0.1.2 THIS APP USE streamlink MODULE WHICH SUPPORTS urllib3 >
 ```
 pip install streamlink --force-reinstall
 ```
-
-
-START FROM VERSION 0.1.2 YOU SHOULD USE THAT "mypyinstaller.bat" (or "mypyinstaller.sh" IF YOU'RE ON LINUX) TO COMPILE WITH pyinstaller.
 
 THAT "streamlink" MODULE FOLDER MUST BE ON SAME FOLDER WITH "pyvls.pyw" and "mypyinstaller.bat", OR YOU CAN CHANGE THE LOCATION FOLDER BY EDITING "mypyinstaller.bat".
 
