@@ -87,7 +87,7 @@ You can save thsese 2 commands into a shell script for example can name it xfce4
 
 ```
 cat << 'EOF' > xfce4.sh
-#! /bin/sh
+#!/data/data/com.termux/files/usr/bin/bash
 pulseaudio --start --exit-idle-time=-1 --load="module-native-protocol-tcp auth-anonymous=1"
 termux-x11 :1 -xstartup "dbus-launch --exit-with-session xfce4-session" -dpi 120 &
 EOF
@@ -210,6 +210,25 @@ EOF
 chmod +x vmic.sh
 ./vmic.sh
 ```
+
+If you're using older android like those Phoenix OS variants you can not use termux-11, instead you should use bVNC Free to run xfce4
+
+```
+pkg i -y tigervnc xorg-xhost 
+xhost +local:
+cat << 'EOF' > vnc-xfce4.sh
+#!/data/data/com.termux/files/usr/bin/bash
+#!/data/data/com.termux/files/usr/bin/bash
+vncserver -kill :1 >/dev/null 2>&1
+rm -rf "$PREFIX/tmp/.X11-unix/X1" "$PREFIX/tmp/.X1-lock" /tmp/.X11-unix/X1 /tmp/.X1-lock 2>/dev/null
+export HOSTNAME=localhost
+touch "$HOME/.Xauthority"
+vncserver -localhost -geometry 1024x600 -depth 16 :1 2>&1 | grep -v 'bad display name'
+EOF
+chmod +x vnc-xfce4.sh
+./vnc-xfce4.sh
+```
+
 
 START FROM VERSION 0.1.2 THIS APP USE streamlink MODULE WHICH SUPPORTS urllib3 >= 1.26, < 3.x BRANCH, SO IF YOU'RE STILL WANT TO INSTALL THIS APP TRY TO REINSTALL streamlink WITH --force-reinstall ARGUMENT.
 
