@@ -283,6 +283,28 @@ Or simply just use that [route_audio.sh](https://github.com/botbahlul/pyvosklive
 
 On macOS you will need [blackhole](https://github.com/existentialaudio/blackhole) and [switchaudio-osx](https://github.com/deweller/switchaudio-osx)
 
+If you're using HomeBrew
+
+```
+brew install blackhole-2ch switchaudio-osx
+```
+
+If you're using MacPorts
+
+```
+sudo port install BlackHole SwitchAudio-osx
+```
+
+After that you need to create Multi-Output Device named "Mixed Output" so you can use that vmic-mac script
+
+Open Audio MIDI Setup (Applications → Utilities)
+
+Click the + button at the bottom left → Create Multi-Output Device
+
+In the right pane, check BlackHole 2ch and speaker output (e.g. Built-in Output). Important sequence: put the speaker as the main device (top) and tick Drift Correction on BlackHole 2ch
+
+Double-click the device name in the left list, then change the name exactly to "Mixed Output" (case and spacing must be the same)
+
 
 To DRAG/MOVE that TRANSLATION TEXT anywhere on the screen, just USE CONTROL KEY + LEFT MOUSE combination.
 
