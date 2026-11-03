@@ -281,7 +281,7 @@ On linux you willl need PAVUCONTROL (by choosing MONITOR of your audio device as
 Or simply just use that [route_audio.sh](https://github.com/botbahlul/pyvosklivesubtitle/blob/main/route_audio.sh) script
 
 
-On macOS you will need [blackhole](https://github.com/existentialaudio/blackhole)
+On macOS you will need [blackhole](https://github.com/existentialaudio/blackhole) and [switchaudio-osx](https://github.com/deweller/switchaudio-osx)
 
 
 To DRAG/MOVE that TRANSLATION TEXT anywhere on the screen, just USE CONTROL KEY + LEFT MOUSE combination.
