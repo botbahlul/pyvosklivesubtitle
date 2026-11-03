@@ -301,7 +301,9 @@ Open Audio MIDI Setup (Applications → Utilities)
 
 Click the + button at the bottom left → Create Multi-Output Device
 
-In the right pane, check BlackHole 2ch and speaker output (e.g. Built-in Output). Important sequence: put the speaker as the main device (top) and tick Drift Correction on BlackHole 2ch
+In the right pane, check BlackHole 2ch and speaker output (e.g. Built-in Output)
+
+Important sequence: put the speaker as the main device (top) and tick Drift Correction on BlackHole 2ch
 
 Double-click the device name in the left list, then change the name exactly to "Mixed Output" (case and spacing must be the same)
 
